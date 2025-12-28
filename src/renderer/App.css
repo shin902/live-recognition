@@ -13,9 +13,6 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-}
-
-.app-root {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: #fff;
   padding: 12px;

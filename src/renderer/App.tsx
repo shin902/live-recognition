@@ -101,6 +101,15 @@ export default function App(): JSX.Element {
     void checkMicPermission();
   }, [loadConfig, checkMicPermission]);
 
+  // 定数
+  const MAX_PROCESSED_TRANSCRIPTS = 100;
+  const MAX_PASTE_LENGTH = 10000;
+  const CONTROL_BAR_HEIGHT = 60;
+  const VERTICAL_PADDING = 24;
+  const SCROLL_BOTTOM_THRESHOLD = 10;
+  const MIN_WINDOW_HEIGHT = 160;
+  const RESIZE_DEBOUNCE_MS = 100;
+
   // 整形済みテキストの状態
   const [refinedText, setRefinedText] = useState('');
   const [isRefining, setIsRefining] = useState(false);
@@ -108,6 +117,7 @@ export default function App(): JSX.Element {
   const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const refiningCountRef = useRef(0); // 並行実行中の整形処理数
 
   // 順序保証のためのキュー管理
   const sequenceIdRef = useRef(0); // 発話のシーケンスID
@@ -120,7 +130,8 @@ export default function App(): JSX.Element {
       return rawText;
     }
 
-    setIsRefining(true);
+    refiningCountRef.current++;
+    setIsRefining(refiningCountRef.current > 0);
     setRefineError(null);
 
     try {
@@ -138,29 +149,28 @@ export default function App(): JSX.Element {
       console.error('Groq refine error:', err);
       return rawText;
     } finally {
-      setIsRefining(false);
+      refiningCountRef.current--;
+      setIsRefining(refiningCountRef.current > 0);
     }
   }, []);
 
   // 完了した整形結果を順序通りに表示
   const displayCompletedResults = useCallback(() => {
-    let hasNewText = false;
-    let newText = refinedText;
-
-    // 次に表示すべきシーケンスIDから順に処理
-    while (completedResultsRef.current.has(nextToDisplayRef.current)) {
-      const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
-      newText = newText + (newText ? '\n' : '') + result;
-      completedResultsRef.current.delete(nextToDisplayRef.current);
-      nextToDisplayRef.current++;
-      hasNewText = true;
-      console.info(`📝 Displaying sequence ${nextToDisplayRef.current - 1}: ${result}`);
-    }
-
-    if (hasNewText) {
-      setRefinedText(newText);
-    }
-  }, [refinedText]);
+    setRefinedText(prev => {
+      const parts: string[] = prev ? [prev] : [];
+      
+      // 次に表示すべきシーケンスIDから順に処理
+      while (completedResultsRef.current.has(nextToDisplayRef.current)) {
+        const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
+        parts.push(result);
+        completedResultsRef.current.delete(nextToDisplayRef.current);
+        console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
+        nextToDisplayRef.current++;
+      }
+      
+      return parts.join('\n');
+    });
+  }, []);
 
   // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
@@ -174,6 +184,12 @@ export default function App(): JSX.Element {
       const sequenceId = sequenceIdRef.current++;
       console.info(`🎯 Final transcript received [seq:${sequenceId}], starting refinement:`, text);
       processedTranscriptsRef.current.add(text);
+      
+      // メモリリーク防止: 古いエントリを削除
+      if (processedTranscriptsRef.current.size > MAX_PROCESSED_TRANSCRIPTS) {
+        const entries = Array.from(processedTranscriptsRef.current);
+        processedTranscriptsRef.current = new Set(entries.slice(-Math.floor(MAX_PROCESSED_TRANSCRIPTS / 2)));
+      }
       
       // 即座に整形開始（非同期で待たない）
       void (async () => {
@@ -296,27 +312,27 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
-  // textareaの高さが変わったらウィンドウをリサイズ
+  // textareaの高さが変わったらウィンドウをリサイズ（デバウンス付き）
   useEffect(() => {
     if (!textareaRef.current) return;
 
-    const updateWindowSize = async () => {
+    const timeoutId = setTimeout(async () => {
       if (!textareaRef.current) return;
       
-      // textareaの高さ + コントロールバーの高さ + padding
       const textareaHeight = textareaRef.current.scrollHeight;
-      const controlBarHeight = 60;
-      const padding = 24; // 上下のpadding
-      const totalHeight = Math.max(160, textareaHeight + controlBarHeight + padding);
+      const totalHeight = Math.max(
+        MIN_WINDOW_HEIGHT, 
+        textareaHeight + CONTROL_BAR_HEIGHT + VERTICAL_PADDING
+      );
       
       try {
         await window.electronAPI.resizeWindow(totalHeight);
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
-    };
+    }, RESIZE_DEBOUNCE_MS);
 
-    void updateWindowSize();
+    return () => clearTimeout(timeoutId);
   }, [refinedText]);
 
   // textareaの自動スクロール
@@ -331,7 +347,7 @@ export default function App(): JSX.Element {
     if (!textareaRef.current) return;
     
     const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
     
     setIsUserScrolling(!isAtBottom);
   }, []);
@@ -341,6 +357,12 @@ export default function App(): JSX.Element {
     // 整形後テキストを優先、なければ整形中のinterimを使用
     const textToPaste = refinedText || interimTranscript;
     if (!textToPaste) return;
+
+    // テキスト長の検証
+    if (textToPaste.length > MAX_PASTE_LENGTH) {
+      setError(`貼り付けるテキストが長すぎます（最大${MAX_PASTE_LENGTH}文字）`);
+      return;
+    }
 
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
