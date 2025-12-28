@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import path from 'path';
 import dotenv from 'dotenv';
+
+const path = require('path');
 
 // 環境変数の読み込み
 dotenv.config();

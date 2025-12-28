@@ -16,7 +16,7 @@ export default defineConfig({
         preload: path.resolve(__dirname, 'src/main/preload.ts'),
         renderer: path.resolve(__dirname, 'src/renderer/index.html'),
       },
-      external: ['electron', 'dotenv'],
+      external: ['electron', 'dotenv', 'path', 'fs'],
       output: [
         {
           dir: 'dist/main',
