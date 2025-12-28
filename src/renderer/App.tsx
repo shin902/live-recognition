@@ -5,6 +5,28 @@ import { useDeepgram } from './hooks/use-deepgram';
 import { VoiceStatus } from './components/VoiceStatus';
 import refinePromptTemplate from './prompts/refine-text.txt?raw';
 
+// 定数（モジュールスコープ）
+const TRANSCRIPT_CONFIG = {
+  MAX_PROCESSED: 100,
+  MAX_PASTE_LENGTH: 10000,
+  CONTROL_BAR_HEIGHT: 60,
+  VERTICAL_PADDING: 24,
+  SCROLL_BOTTOM_THRESHOLD: 10,
+  MIN_WINDOW_HEIGHT: 160,
+  RESIZE_DEBOUNCE_MS: 100,
+  MAX_SEQUENCE_GAP: 5,
+  SEQUENCE_TIMEOUT_MS: 30000,
+} as const;
+
+// プロンプトテンプレートの検証（起動時に1回のみ）
+const validatePromptTemplate = () => {
+  const count = (refinePromptTemplate.match(/{{text}}/g) || []).length;
+  if (count !== 1) {
+    throw new Error('Invalid prompt template: {{text}} placeholder must appear exactly once');
+  }
+};
+validatePromptTemplate();
+
 interface ConfigInfo {
   appVersion: string;
   nodeVersion: string;
@@ -101,17 +123,6 @@ export default function App(): JSX.Element {
     void checkMicPermission();
   }, [loadConfig, checkMicPermission]);
 
-  // 定数
-  const MAX_PROCESSED_TRANSCRIPTS = 100;
-  const MAX_PASTE_LENGTH = 10000;
-  const CONTROL_BAR_HEIGHT = 60;
-  const VERTICAL_PADDING = 24;
-  const SCROLL_BOTTOM_THRESHOLD = 10;
-  const MIN_WINDOW_HEIGHT = 160;
-  const RESIZE_DEBOUNCE_MS = 100;
-  const MAX_SEQUENCE_GAP = 5; // 許容する最大シーケンスギャップ
-  const SEQUENCE_TIMEOUT_MS = 30000; // 30秒
-
   // 整形済みテキストの状態
   const [refinedText, setRefinedText] = useState('');
   const [isRefining, setIsRefining] = useState(false);
@@ -121,12 +132,20 @@ export default function App(): JSX.Element {
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const refiningCountRef = useRef(0); // 並行実行中の整形処理数
   const prevHeightRef = useRef(0); // 前回のtextarea高さ
+  const isMountedRef = useRef(true); // コンポーネントのマウント状態
 
   // 順序保証のためのキュー管理
   const sequenceIdRef = useRef(0); // 発話のシーケンスID
   const completedResultsRef = useRef<Map<number, string>>(new Map()); // 完了した整形結果
   const sequenceTimestampsRef = useRef<Map<number, number>>(new Map()); // シーケンス開始時刻
   const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
+
+  // コンポーネントのアンマウント検出
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Groq API経由でテキスト整形（IPC使用）
   const refineText = useCallback(async (rawText: string): Promise<string> => {
@@ -139,12 +158,6 @@ export default function App(): JSX.Element {
     setRefineError(null);
 
     try {
-      // プロンプトテンプレートの検証
-      const templateCount = (refinePromptTemplate.match(/{{text}}/g) || []).length;
-      if (templateCount !== 1) {
-        throw new Error('Invalid prompt template: {{text}} placeholder must appear exactly once');
-      }
-      
       const prompt = refinePromptTemplate.replace('{{text}}', rawText);
       const result = await window.electronAPI.groqRefineText(prompt);
 
@@ -166,10 +179,13 @@ export default function App(): JSX.Element {
 
   // 完了した整形結果を順序通りに表示（タイムアウト・ギャップ処理付き）
   const displayCompletedResults = useCallback(() => {
+    if (!isMountedRef.current) return; // アンマウント後は実行しない
+    
     const now = Date.now();
     
     setRefinedText(prev => {
       const parts: string[] = prev ? [prev] : [];
+      let shouldRetry = false;
       
       // 次に表示すべきシーケンスIDから順に処理
       while (completedResultsRef.current.has(nextToDisplayRef.current)) {
@@ -183,33 +199,35 @@ export default function App(): JSX.Element {
       
       // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
       const gap = sequenceIdRef.current - nextToDisplayRef.current;
-      if (gap > MAX_SEQUENCE_GAP) {
+      if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
         const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
         
-        if (oldestTimestamp && now - oldestTimestamp > SEQUENCE_TIMEOUT_MS) {
+        if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
           console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
           sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
           nextToDisplayRef.current++;
-          
-          // 再帰的に次のシーケンスをチェック
-          return prev; // 再度呼び出されるのでprevを返す
-        } else if (!oldestTimestamp && gap > MAX_SEQUENCE_GAP * 2) {
-          // タイムスタンプがなく、ギャップが非常に大きい場合もスキップ
+          shouldRetry = true;
+        } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
           console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
           nextToDisplayRef.current++;
-          return prev;
+          shouldRetry = true;
         }
       }
       
       // メモリリーク防止: 古い完了結果をクリーンアップ
-      if (completedResultsRef.current.size > MAX_SEQUENCE_GAP * 2) {
-        const oldestAllowed = nextToDisplayRef.current - MAX_SEQUENCE_GAP;
+      if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
+        const oldestAllowed = nextToDisplayRef.current - TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP;
         for (const [seqId] of completedResultsRef.current) {
           if (seqId < oldestAllowed) {
             completedResultsRef.current.delete(seqId);
             sequenceTimestampsRef.current.delete(seqId);
           }
         }
+      }
+      
+      // スキップ後に再試行が必要な場合、次のtickで再実行
+      if (shouldRetry && isMountedRef.current) {
+        setTimeout(() => displayCompletedResults(), 0);
       }
       
       return parts.join('\n');
@@ -232,9 +250,9 @@ export default function App(): JSX.Element {
       sequenceTimestampsRef.current.set(sequenceId, startTime);
       
       // メモリリーク防止: 古いエントリを削除
-      if (processedTranscriptsRef.current.size > MAX_PROCESSED_TRANSCRIPTS) {
+      if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
         const entries = Array.from(processedTranscriptsRef.current);
-        processedTranscriptsRef.current = new Set(entries.slice(-Math.floor(MAX_PROCESSED_TRANSCRIPTS / 2)));
+        processedTranscriptsRef.current = new Set(entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2)));
       }
       
       // 即座に整形開始（非同期で待たない）
@@ -244,6 +262,8 @@ export default function App(): JSX.Element {
           const refined = await refineText(text);
           console.info(`✨ Refined result [seq:${sequenceId}]:`, refined);
 
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+
           // 整形完了をキューに格納
           completedResultsRef.current.set(sequenceId, refined);
           sequenceTimestampsRef.current.delete(sequenceId);
@@ -252,8 +272,13 @@ export default function App(): JSX.Element {
           displayCompletedResults();
         } catch (err) {
           console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
-          // エラー時もタイムスタンプを削除してスタックを防ぐ
+          
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+          
+          // エラー時はフォールバックとして元のテキストを使用
+          completedResultsRef.current.set(sequenceId, text);
           sequenceTimestampsRef.current.delete(sequenceId);
+          displayCompletedResults();
         }
       })();
     },
@@ -377,8 +402,8 @@ export default function App(): JSX.Element {
       
       prevHeightRef.current = newHeight;
       const totalHeight = Math.max(
-        MIN_WINDOW_HEIGHT, 
-        newHeight + CONTROL_BAR_HEIGHT + VERTICAL_PADDING
+        TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT, 
+        newHeight + TRANSCRIPT_CONFIG.CONTROL_BAR_HEIGHT + TRANSCRIPT_CONFIG.VERTICAL_PADDING
       );
       
       try {
@@ -386,7 +411,7 @@ export default function App(): JSX.Element {
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
-    }, RESIZE_DEBOUNCE_MS);
+    }, TRANSCRIPT_CONFIG.RESIZE_DEBOUNCE_MS);
 
     return () => clearTimeout(timeoutId);
   }, [refinedText]);
@@ -403,7 +428,7 @@ export default function App(): JSX.Element {
     if (!textareaRef.current) return;
     
     const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < TRANSCRIPT_CONFIG.SCROLL_BOTTOM_THRESHOLD;
     
     setIsUserScrolling(!isAtBottom);
   }, []);
@@ -415,8 +440,8 @@ export default function App(): JSX.Element {
     if (!textToPaste) return;
 
     // テキスト長の検証
-    if (textToPaste.length > MAX_PASTE_LENGTH) {
-      setError(`貼り付けるテキストが長すぎます（最大${MAX_PASTE_LENGTH}文字）`);
+    if (textToPaste.length > TRANSCRIPT_CONFIG.MAX_PASTE_LENGTH) {
+      setError(`貼り付けるテキストが長すぎます（最大${TRANSCRIPT_CONFIG.MAX_PASTE_LENGTH}文字）`);
       return;
     }
 
