@@ -94,6 +94,29 @@ const createWindow = (): void => {
     mainWindow.webContents.openDevTools();
   }
 
+  // レンダラープロセスのコンソールログをターミナルに出力
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const logPrefix = '[Renderer]';
+    const location = sourceId ? ` (${sourceId}:${line})` : '';
+    
+    switch (level) {
+      case 0: // verbose/debug
+        console.log(`${logPrefix} ${message}${location}`);
+        break;
+      case 1: // info
+        console.info(`${logPrefix} ${message}${location}`);
+        break;
+      case 2: // warning
+        console.warn(`${logPrefix} ${message}${location}`);
+        break;
+      case 3: // error
+        console.error(`${logPrefix} ${message}${location}`);
+        break;
+      default:
+        console.log(`${logPrefix} ${message}${location}`);
+    }
+  });
+
   // レンダラープロセスをロード
   // __dirname = dist/main なので、../renderer/index.html で dist/renderer/index.html を指す
   const rendererPath = path.join(__dirname, '..', 'renderer', 'index.html');

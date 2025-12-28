@@ -23,6 +23,14 @@ export function useVoiceInput({
   const [errored, setErrored] = useState<string | null>(null);
   const vadRef = useRef<MicVAD | null>(null);
 
+  // コールバックをrefで保持して、useEffectの依存配列から除外
+  const callbacksRef = useRef({ onSpeechStart, onSpeechEnd, onAudioData, onError });
+
+  // コールバックが変更されたら更新
+  useEffect(() => {
+    callbacksRef.current = { onSpeechStart, onSpeechEnd, onAudioData, onError };
+  }, [onSpeechStart, onSpeechEnd, onAudioData, onError]);
+
   useEffect(() => {
     let mounted = true;
 
@@ -36,13 +44,13 @@ export function useVoiceInput({
             if (!mounted) return;
             setStatus('speech_detected');
             console.log('Speech started');
-            onSpeechStart?.();
+            callbacksRef.current.onSpeechStart?.();
           },
           onFrameProcessed: (probs, frame) => {
             if (!mounted) return;
-            if (frame && onAudioData) {
+            if (frame && callbacksRef.current.onAudioData) {
               const int16Data = float32ToInt16(frame);
-              onAudioData(int16Data);
+              callbacksRef.current.onAudioData(int16Data);
             }
           },
           onSpeechEnd: (audio) => {
@@ -52,12 +60,12 @@ export function useVoiceInput({
 
             try {
               const wavBlob = convertFloat32ToWav(audio, 16000);
-              onSpeechEnd?.(wavBlob);
+              callbacksRef.current.onSpeechEnd?.(wavBlob);
               setStatus('listening');
             } catch (err) {
               console.error('WAV conversion error:', err);
               setStatus('error');
-              onError?.('音声変換に失敗しました');
+              callbacksRef.current.onError?.('音声変換に失敗しました');
             }
           },
           onVADMisfire: () => {
@@ -77,7 +85,7 @@ export function useVoiceInput({
           const errorMsg = err instanceof Error ? err.message : 'VADの初期化に失敗しました';
           setErrored(errorMsg);
           setLoading(false);
-          onError?.(errorMsg);
+          callbacksRef.current.onError?.(errorMsg);
         }
       }
     };
@@ -90,7 +98,7 @@ export function useVoiceInput({
         vadRef.current.destroy();
       }
     };
-  }, [onSpeechStart, onSpeechEnd, onAudioData, onError]);
+  }, []); // 依存配列を空にしてVADの再初期化を防ぐ
 
   const toggleListening = useCallback(async () => {
     if (!vadRef.current) return;
@@ -110,9 +118,9 @@ export function useVoiceInput({
       const errorMsg = err instanceof Error ? err.message : 'マイクの制御に失敗しました';
       setErrored(errorMsg);
       setStatus('error');
-      onError?.(errorMsg);
+      callbacksRef.current.onError?.(errorMsg);
     }
-  }, [isListening, onError]);
+  }, [isListening]);
 
   return {
     status,
