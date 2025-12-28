@@ -709,7 +709,6 @@ export default function App(): JSX.Element {
                 }}
               />
             </div>
-            </div>
 
             {/* コントロールバー */}
             <div className="floating-bar" role="status" aria-live="polite">
