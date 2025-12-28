@@ -654,7 +654,32 @@ export default function App(): JSX.Element {
         {config && !loading && !error && (
           <>
             {/* テキストエリア */}
-            <div className="transcript-area-container">
+            <div className="transcript-area-container" style={{ position: 'relative' }}>
+              {/* 表示用のdiv（色分け可能） */}
+              <div
+                className="transcript-display"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  padding: '12px 16px',
+                  fontSize: '14px',
+                  lineHeight: '1.6',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  color: '#fff',
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word',
+                  overflowY: 'auto',
+                  pointerEvents: 'none',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <span style={{ color: '#fff' }}>{refinedText}</span>
+                <span style={{ color: 'rgba(255, 255, 255, 0.4)' }}>{bufferText}</span>
+              </div>
+              {/* 編集用のtextarea（透明） */}
               <textarea
                 ref={textareaRef}
                 className="transcript-textarea"
@@ -679,11 +704,11 @@ export default function App(): JSX.Element {
                 aria-atomic="false"
                 aria-busy={isRefining}
                 style={{
-                  background: 'linear-gradient(to right, rgba(0, 0, 0, 0.85) ' + 
-                    (refinedText.length / (refinedText.length + bufferText.length) * 100) + '%, rgba(0, 0, 0, 0.7) ' +
-                    (refinedText.length / (refinedText.length + bufferText.length) * 100) + '%)'
+                  color: 'transparent',
+                  caretColor: '#fff',
                 }}
               />
+            </div>
             </div>
 
             {/* コントロールバー */}
