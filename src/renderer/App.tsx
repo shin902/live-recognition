@@ -149,12 +149,21 @@ export default function App(): JSX.Element {
   const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
   const isDisplayingRef = useRef(false); // 表示処理中フラグ（競合状態防止）
   const displayRetryCountRef = useRef(0); // 再試行カウンター
+  const globalRetryCountRef = useRef(0); // グローバル再試行カウンター（1分間の累積）
+  const globalRetryResetTimeRef = useRef(Date.now()); // グローバルカウンターリセット時刻
+  const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // リサイズデバウンス用
   const MAX_DISPLAY_RETRIES = 10; // 最大再試行回数
+  const MAX_GLOBAL_RETRIES = 50; // 1分間の最大累積再試行回数
 
   // コンポーネントのアンマウント検出
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      // リサイズタイマーのクリーンアップ
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
+        resizeTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -203,83 +212,101 @@ export default function App(): JSX.Element {
     isDisplayingRef.current = true;
     const now = Date.now();
     
+    // グローバル再試行カウンターのリセット（1分経過後）
+    if (now - globalRetryResetTimeRef.current > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+      globalRetryCountRef.current = 0;
+      globalRetryResetTimeRef.current = now;
+    }
+    
+    // グローバル再試行制限チェック
+    if (globalRetryCountRef.current >= MAX_GLOBAL_RETRIES) {
+      console.warn(`⚠️  Global retry limit (${MAX_GLOBAL_RETRIES}/min) reached, skipping`);
+      isDisplayingRef.current = false;
+      return;
+    }
+    
+    const parts: string[] = [];
+    let shouldRetry = false;
+    let hasDisplayedAny = false;
+    let currentText = '';
+    
+    // 現在のテキストを取得するため、setRefinedTextの外で処理
     setRefinedText(prev => {
-      const parts: string[] = prev ? [prev] : [];
-      let shouldRetry = false;
-      let hasDisplayedAny = false;
+      currentText = prev;
+      return prev; // 一旦そのまま返す
+    });
+    
+    parts.push(...(currentText ? [currentText] : []));
+    
+    // 次に表示すべきシーケンスIDから順に処理
+    while (completedResultsRef.current.has(nextToDisplayRef.current)) {
+      const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
+      parts.push(result);
+      completedResultsRef.current.delete(nextToDisplayRef.current);
+      sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
+      console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
+      nextToDisplayRef.current++;
+      hasDisplayedAny = true;
+    }
+    
+    // 表示があった場合は再試行カウンターをリセット
+    if (hasDisplayedAny) {
+      displayRetryCountRef.current = 0;
+    }
+    
+    // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
+    const gap = sequenceIdRef.current - nextToDisplayRef.current;
+    if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
+      const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
       
-      // 次に表示すべきシーケンスIDから順に処理
-      while (completedResultsRef.current.has(nextToDisplayRef.current)) {
-        const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
-        parts.push(result);
-        completedResultsRef.current.delete(nextToDisplayRef.current);
+      if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
+        console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
         sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
-        console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
         nextToDisplayRef.current++;
-        hasDisplayedAny = true;
+        shouldRetry = true;
+      } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
+        console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
+        nextToDisplayRef.current++;
+        shouldRetry = true;
       }
+    }
+    
+    // メモリリーク防止: completedResultsRefの最大サイズを常に強制
+    if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS) {
+      const sortedEntries = Array.from(completedResultsRef.current.entries())
+        .sort(([a], [b]) => a - b);
+      const toKeep = sortedEntries.slice(-TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS);
+      completedResultsRef.current = new Map(toKeep);
       
-      // 表示があった場合は再試行カウンターをリセット
-      if (hasDisplayedAny) {
-        displayRetryCountRef.current = 0;
-      }
-      
-      // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
-      const gap = sequenceIdRef.current - nextToDisplayRef.current;
-      if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
-        const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
-        
-        if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
-          console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
-          sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
-          nextToDisplayRef.current++;
-          shouldRetry = true;
-        } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
-          console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
-          nextToDisplayRef.current++;
-          shouldRetry = true;
+      // 対応するタイムスタンプもクリーンアップ
+      for (const [seqId] of sequenceTimestampsRef.current) {
+        if (!completedResultsRef.current.has(seqId) && seqId < nextToDisplayRef.current) {
+          sequenceTimestampsRef.current.delete(seqId);
         }
       }
+    }
+    
+    // state更新（表示があった場合のみ）
+    if (hasDisplayedAny) {
+      setRefinedText(parts.join('\n'));
+    }
+    
+    // フラグクリアと再試行処理をstate更新後に実行
+    queueMicrotask(() => {
+      isDisplayingRef.current = false;
       
-      // メモリリーク防止: completedResultsRefの最大サイズを常に強制
-      if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS) {
-        const sortedEntries = Array.from(completedResultsRef.current.entries())
-          .sort(([a], [b]) => a - b);
-        const toKeep = sortedEntries.slice(-TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS);
-        completedResultsRef.current = new Map(toKeep);
-        
-        // 対応するタイムスタンプもクリーンアップ
-        for (const [seqId] of sequenceTimestampsRef.current) {
-          if (!completedResultsRef.current.has(seqId) && seqId < nextToDisplayRef.current) {
-            sequenceTimestampsRef.current.delete(seqId);
-          }
-        }
-      }
-      
-      // スキップ後に再試行が必要な場合、次のtickで再実行（最大回数制限付き）
+      // スキップ後に再試行が必要な場合
       if (shouldRetry && isMountedRef.current && !isManuallyEdited) {
         displayRetryCountRef.current++;
+        globalRetryCountRef.current++;
+        
         if (displayRetryCountRef.current < MAX_DISPLAY_RETRIES) {
-          // queueMicrotaskでフラグクリア後に再試行をスケジュール
-          queueMicrotask(() => {
-            isDisplayingRef.current = false;
-            displayCompletedResults();
-          });
+          displayCompletedResults();
         } else {
           console.warn(`⚠️  Max display retries (${MAX_DISPLAY_RETRIES}) reached, stopping retry`);
           displayRetryCountRef.current = 0;
-          queueMicrotask(() => {
-            isDisplayingRef.current = false;
-          });
         }
-      } else {
-        // 再試行しない場合もフラグをクリア
-        queueMicrotask(() => {
-          isDisplayingRef.current = false;
-        });
       }
-      
-      return parts.join('\n');
     });
   }, [isManuallyEdited]);
 
@@ -459,11 +486,17 @@ export default function App(): JSX.Element {
       return;
     }
 
-    const timeoutId = setTimeout(async () => {
+    // 既存のタイマーをキャンセル
+    if (resizeTimeoutRef.current) {
+      clearTimeout(resizeTimeoutRef.current);
+    }
+
+    resizeTimeoutRef.current = setTimeout(async () => {
       if (!textareaRef.current) return;
       
       const currentHeight = textareaRef.current.scrollHeight;
       prevHeightRef.current = currentHeight;
+      resizeTimeoutRef.current = null;
       
       const totalHeight = Math.max(
         TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT, 
@@ -477,7 +510,11 @@ export default function App(): JSX.Element {
       }
     }, TRANSCRIPT_CONFIG.RESIZE_DEBOUNCE_MS);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
+      }
+    };
   }, [refinedText]);
 
   // textareaの自動スクロール
