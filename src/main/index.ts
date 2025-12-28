@@ -64,8 +64,7 @@ const registerGetConfigHandler = (): void => {
 registerGetConfigHandler();
 
 /**
- * 文字起こしテキストをアクティブウィンドウに貼り付ける
- * クリップボードにコピーしてからCmd+V (macOS) / Ctrl+V (Windows/Linux) をシミュレート
+ * 文字起こしテキストをコピーし、ウィンドウを閉じて、次のアクティブウィンドウに貼り付けてからアプリを終了
  */
 let isPasteHandlerRegistered = false;
 const registerPasteHandler = (): void => {
@@ -76,20 +75,32 @@ const registerPasteHandler = (): void => {
       // クリップボードにテキストをコピー
       clipboard.writeText(text);
 
-      // macOSの場合、AppleScriptを使ってCmd+Vをシミュレート
+      // macOSの場合
       if (process.platform === 'darwin') {
+        // ウィンドウを閉じる（次のウィンドウが自動的にアクティブになる）
+        if (mainWindow) {
+          mainWindow.hide();
+        }
+
+        // 少し待ってから次のアクティブウィンドウにCmd+Vを送信
         return new Promise((resolve) => {
-          exec(
-            `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
-            (error) => {
-              if (error) {
-                console.error('Paste simulation error:', error);
-                resolve({ success: false, error: error.message });
-              } else {
-                resolve({ success: true });
+          setTimeout(() => {
+            exec(
+              `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
+              (error) => {
+                if (error) {
+                  console.error('Paste simulation error:', error);
+                  resolve({ success: false, error: error.message });
+                } else {
+                  // 貼り付け成功後、アプリを終了
+                  setTimeout(() => {
+                    app.quit();
+                  }, 100);
+                  resolve({ success: true });
+                }
               }
-            }
-          );
+            );
+          }, 150); // ウィンドウ切り替えを待つ
         });
       }
       
