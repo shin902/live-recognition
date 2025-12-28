@@ -1,7 +1,6 @@
 import {
   app,
   BrowserWindow,
-  dialog,
   globalShortcut,
   ipcMain,
   Menu,
@@ -33,6 +32,11 @@ type ConfigResponse = {
   error?: string;
 };
 
+/**
+ * get-config IPCハンドラーを登録する
+ * レンダラープロセスからの設定取得リクエストに応答する
+ * 重複登録を防ぐガード付き
+ */
 const registerGetConfigHandler = (): void => {
   if (isGetConfigHandlerRegistered) return;
 
@@ -60,15 +64,17 @@ const registerGetConfigHandler = (): void => {
   isGetConfigHandlerRegistered = true;
 };
 
+/**
+ * アプリ終了用のグローバルショートカットを登録する
+ * 登録に失敗した場合はエラーログを出力するが、アプリは継続動作する
+ * @param accelerator - ショートカットキー（例: 'CommandOrControl+Q'）
+ */
 const registerQuitShortcut = (accelerator: string): void => {
   const registered = globalShortcut.register(accelerator, () => {
     app.quit();
   });
   if (!registered) {
-    const message = `Failed to register global shortcut: ${accelerator}`;
-    console.error(message);
-    dialog.showErrorBox('Critical Error', `${message}. The application will quit.`);
-    app.quit();
+    console.error(`Failed to register global shortcut: ${accelerator}. Continuing without it.`);
   }
 };
 
@@ -113,7 +119,11 @@ const createWindow = (): void => {
   mainWindow.loadFile(rendererPath);
 
   const menuTemplate: MenuItemConstructorOptions[] = [
-    { label: 'Live Recognition を終了', accelerator: 'CommandOrControl+Q', click: () => app.quit() },
+    {
+      label: 'Live Recognition を終了',
+      accelerator: 'CommandOrControl+Q',
+      click: () => app.quit(),
+    },
     { label: 'ウィンドウを閉じる', accelerator: 'CommandOrControl+W', click: () => app.quit() },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
@@ -137,9 +147,6 @@ app
     if (process.platform === 'darwin' && app.dock) {
       app.dock.hide();
     }
-
-    // IPCハンドラーを先に準備
-    registerGetConfigHandler();
 
     // フレームレスなので明示的に終了できるショートカットを用意
     registerQuitShortcut('CommandOrControl+Q');
@@ -177,11 +184,9 @@ app.on('activate', () => {
   }
 });
 
-// ログ出力: 環境変数の確認（開発環境のみ）
-if (process.env.NODE_ENV === 'development') {
-  console.info('Environment variable presence (do not share logs):');
-  console.info(
-    `- ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? '設定済み' : '未設定'}`,
-  );
-  console.info(`- GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '設定済み' : '未設定'}`);
+// ログ出力: 環境変数の確認（開発環境かつDEBUG_CONFIG有効時のみ）
+if (process.env.NODE_ENV === 'development' && process.env.DEBUG_CONFIG) {
+  console.info('API Keys status:');
+  console.info(`- ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? 'configured' : 'missing'}`);
+  console.info(`- Groq: ${process.env.GROQ_API_KEY ? 'configured' : 'missing'}`);
 }
