@@ -10,7 +10,7 @@ describe('VoiceStatus', () => {
       <VoiceStatus status="idle" isListening={false} loading={false} onToggle={onToggle} />
     );
 
-    expect(screen.getByText('待機中')).toBeTruthy();
+    expect(screen.getByText('待機中')).toBeInTheDocument();
     const button = screen.getByRole('button');
     expect(button.className).not.toContain('active');
     expect(button.getAttribute('title')).toBe('録音開始');

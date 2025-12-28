@@ -7,7 +7,8 @@ import { MicVAD } from '@ricky0123/vad-web';
 const mockStart = vi.fn();
 const mockPause = vi.fn();
 const mockDestroy = vi.fn();
-let latestOptions: any;
+type VadOptions = Parameters<typeof MicVAD.new>[0];
+let latestOptions: VadOptions | null;
 
 vi.mock('@ricky0123/vad-web', () => ({
   MicVAD: {
@@ -51,6 +52,28 @@ describe('useVoiceInput', () => {
     expect(mockPause).toHaveBeenCalled();
     expect(result.current.isListening).toBe(false);
     expect(result.current.status).toBe('idle');
+  });
+
+  it('no-ops toggle when VAD not ready', async () => {
+    const { result } = renderHook(() => useVoiceInput());
+
+    await act(async () => {
+      await result.current.toggleListening();
+    });
+
+    expect(result.current.isListening).toBe(false);
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('surfaces initialization failure', async () => {
+    mockedNew.mockRejectedValueOnce(new Error('Mic permission denied'));
+    const onError = vi.fn();
+
+    const { result } = renderHook(() => useVoiceInput({ onError }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.errored).toBe('Mic permission denied');
+    expect(onError).toHaveBeenCalledWith('Mic permission denied');
   });
 
   it('emits callbacks on speech events and audio frames', async () => {

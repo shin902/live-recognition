@@ -15,6 +15,8 @@ type UseDeepgramReturn = {
   clearTranscript: () => void;
 };
 
+export const KEEPALIVE_INTERVAL_MS = 10000;
+
 export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn {
   const { onFinalTranscript } = options;
   const [isConnected, setIsConnected] = useState(false);
@@ -46,12 +48,12 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
         setIsConnected(true);
         setError(null);
 
-        // KeepAlive (10秒ごとに送信)
-        keepAliveIntervalRef.current = setInterval(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'KeepAlive' }));
-          }
-        }, 10000);
+         // KeepAlive (10秒ごとに送信)
+         keepAliveIntervalRef.current = setInterval(() => {
+           if (socket.readyState === WebSocket.OPEN) {
+             socket.send(JSON.stringify({ type: 'KeepAlive' }));
+           }
+         }, KEEPALIVE_INTERVAL_MS);
       };
 
       socket.onmessage = (event) => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDeepgram } from '../hooks/use-deepgram';
+import { useDeepgram, KEEPALIVE_INTERVAL_MS } from '../hooks/use-deepgram';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -38,17 +38,19 @@ class MockWebSocket {
   }
 }
 
+let originalWebSocket: typeof WebSocket | undefined;
+
 beforeEach(() => {
   vi.useFakeTimers();
   MockWebSocket.instances = [];
+  originalWebSocket = globalThis.WebSocket;
   (globalThis as any).WebSocket = MockWebSocket as any;
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete (globalThis as any).WebSocket;
+  (globalThis as any).WebSocket = originalWebSocket;
   vi.clearAllMocks();
 });
 
@@ -71,7 +73,7 @@ describe('useDeepgram', () => {
     expect(result.current.isConnected).toBe(true);
     expect(result.current.error).toBeNull();
 
-    vi.advanceTimersByTime(10000);
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
 
     act(() => {
@@ -145,5 +147,57 @@ describe('useDeepgram', () => {
     });
 
     expect(socket.close).toHaveBeenCalled();
+  });
+
+  it('does not reconnect when already connected', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    act(() => {
+      result.current.connect('api-key');
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    act(() => {
+      firstSocket.triggerOpen();
+    });
+
+    act(() => {
+      result.current.connect('api-key');
+    });
+
+    expect(MockWebSocket.instances.length).toBe(1);
+  });
+
+  it('warns when sending audio before connection', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { result } = renderHook(() => useDeepgram());
+
+    act(() => {
+      result.current.sendAudio(new Int16Array([1, 2]));
+    });
+
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('ignores malformed JSON messages', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    act(() => {
+      result.current.connect('api-key');
+    });
+
+    const socket = MockWebSocket.instances[0];
+    act(() => socket.triggerOpen());
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    act(() => {
+      socket.triggerMessage('not-json');
+    });
+
+    expect(result.current.transcript).toBe('');
+    expect(result.current.interimTranscript).toBe('');
+    errorSpy.mockRestore();
   });
 });
