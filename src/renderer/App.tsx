@@ -106,19 +106,14 @@ export default function App(): JSX.Element {
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const pendingTextRef = useRef('');
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
+  const isRefiningRef = useRef(false); // 競合状態を防ぐ
 
   // Groq API経由でテキスト整形（IPC使用）
   const refineText = useCallback(async (rawText: string): Promise<string> => {
     if (!rawText.trim()) {
       return rawText;
     }
-
-    // 前のリクエストをキャンセル
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-    abortControllerRef.current = new AbortController();
 
     setIsRefining(true);
     setRefineError(null);
@@ -133,9 +128,6 @@ export default function App(): JSX.Element {
 
       return result.text || rawText;
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return rawText;
-      }
       const errorMsg = err instanceof Error ? err.message : '整形に失敗しました';
       setRefineError(errorMsg);
       console.error('Groq refine error:', err);
@@ -145,17 +137,17 @@ export default function App(): JSX.Element {
     }
   }, []);
 
-  // クリーンアップ
-  useEffect(() => {
-    return () => {
-      abortControllerRef.current?.abort();
-    };
-  }, []);
-
-  // 確定テキストを受け取ったら整形キューに追加
+  // 確定テキストを受け取ったら整形キューに追加（重複チェック付き）
   const handleFinalTranscript = useCallback(
     async (text: string) => {
+      // 既に処理済みのテキストはスキップ
+      if (processedTranscriptsRef.current.has(text)) {
+        console.info('⏭️  Skipping duplicate transcript:', text);
+        return;
+      }
+      
       console.info('🎯 Final transcript received for refinement:', text);
+      processedTranscriptsRef.current.add(text);
       pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
     },
     []
@@ -187,9 +179,15 @@ export default function App(): JSX.Element {
     [isDeepgramConnected, sendAudio]
   );
 
-  // VAD onSpeechEnd時に整形処理を実行
+  // VAD onSpeechEnd時に整形処理を実行（競合状態対策付き）
   const handleSpeechEnd = useCallback(
     async (_blob: Blob) => {
+      // 既に整形中の場合はスキップ
+      if (isRefiningRef.current) {
+        console.warn('⏸️  Already refining, skipping this speech end event');
+        return;
+      }
+
       // 現在の確定テキストを整形
       const textToRefine = pendingTextRef.current;
       if (!textToRefine.trim()) {
@@ -197,13 +195,18 @@ export default function App(): JSX.Element {
         return;
       }
 
-      console.info('🔄 Refining text:', textToRefine);
-      const refined = await refineText(textToRefine);
-      console.info('✨ Refined result:', refined);
+      isRefiningRef.current = true;
+      try {
+        console.info('🔄 Refining text:', textToRefine);
+        const refined = await refineText(textToRefine);
+        console.info('✨ Refined result:', refined);
 
-      setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
-      pendingTextRef.current = ''; // 整形済みなのでクリア
-      clearTranscript(); // Deepgramのtranscriptもクリア
+        setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
+        pendingTextRef.current = ''; // 整形済みなのでクリア
+        clearTranscript(); // Deepgramのtranscriptもクリア
+      } finally {
+        isRefiningRef.current = false;
+      }
     },
     [refineText, clearTranscript]
   );
@@ -252,7 +255,7 @@ export default function App(): JSX.Element {
       setError(deepgramError);
       // エラー時は停止する
       if (isListening) {
-        toggleListening();
+        void toggleListening();
         disconnect();
       }
     }
