@@ -6,8 +6,8 @@
 
 ### 主要機能
 1. **リアルタイム音声入力**: マイクから音声を取得し、VAD（Voice Activity Detection）で発話区間を検出
-2. **音声認識**: OpenAI Realtime APIまたはWhisper APIで音声をテキスト化
-3. **文章整形**: Claude APIまたはGPT APIでテキストを整形・校正
+2. **音声認識**: elevenlabs realtime APIで音声をテキスト化
+3. **文章整形**: groq apiでテキストを整形・校正
 4. **自動入力**: 整形されたテキストをアクティブなアプリケーションに自動的にキー入力
 
 ### ゴール
@@ -18,9 +18,8 @@
 ## Tech Stack
 
 ### フレームワーク
-- **Electron** (推奨) - デスクトップアプリケーション基盤
+- **Electron** - デスクトップアプリケーション基盤
   - AIエージェントとの相性、学習データの豊富さ、macOS機能実装例の多さから選定
-  - 代替案: Tauri（軽量性重視の場合、ただしRustコードが必要になる可能性）
 
 ### フロントエンド
 - **TypeScript** - 型安全性を確保
@@ -30,16 +29,12 @@
 ### 音声処理
 - **Web Audio API** - マイク入力
 - **VAD (Voice Activity Detection)**
-  - `@ricky0123/vad-web` - ブラウザベースVAD（推奨）
-  - または Silero VAD
+  - `@ricky0123/vad-web` - ブラウザベースVAD
 - **音声認識API**
-  - OpenAI Realtime API（推奨・低レイテンシ）
-  - OpenAI Whisper API
-  - Azure Speech Services
-  - Google Cloud Speech-to-Text
+  - elevenlabs realtime API（推奨・低レイテンシ）
 
 ### LLM統合
-- **Claude API** または **OpenAI GPT API**
+- **groq api(gpt-oss-120b)**
 - 文章整形・校正プロンプト実装
 
 ### Electronモジュール
@@ -47,8 +42,8 @@
 - `robotjs` または `nut-js` - 自動キー入力（macOSアクセシビリティ権限必要）
 
 ### 開発ツール
-- **パッケージマネージャ**: pnpm（推奨）または npm
-- **ビルドツール**: Vite または Webpack
+- **パッケージマネージャ**: pnpm
+- **ビルドツール**: Vite
 - **バージョン管理**: Git
 - **コード品質**: ESLint, Prettier
 - **型チェック**: TypeScript Compiler
@@ -107,7 +102,6 @@
 - **プロンプト設計**:
   - 音声認識結果には誤認識やフィラー（えー、あのー）が含まれる
   - 句読点の適切な挿入、誤字脱字の修正、文章の自然な整形が必要
-- **ストリーミング応答**: 可能であればLLMもストリーミングで処理しレイテンシ削減
 
 ### macOS自動化
 - **アクセシビリティ権限**: `robotjs`や`nut-js`でキー入力するには必須
@@ -123,7 +117,7 @@
 - **オフライン動作**: 音声認識・LLMはクラウドAPIに依存（完全オフラインは不可）
 
 ### ビジネス制約
-- **APIコスト**: OpenAI/Claude APIの使用量に応じた課金
+- **APIコスト**: groq apiを使用するので、無料枠（1ヶ月1000万トークン）を活用する
 - **プライバシー**: 音声データはローカル処理が望ましいが、認識精度とのトレードオフ
 
 ### 規制・セキュリティ
@@ -134,21 +128,12 @@
 ## External Dependencies
 
 ### 音声認識サービス
-- **OpenAI Realtime API** (推奨)
-  - WebSocket接続でリアルタイム音声認識
+- **Elevenlabs Realtime API** (推奨)
   - 低レイテンシ
-- **OpenAI Whisper API**
-  - REST API、音声ファイルをPOST
-  - Realtime APIより高レイテンシだが安定
-- **代替**: Azure Speech Services, Google Cloud Speech-to-Text
 
 ### LLM API
-- **Claude API** (Anthropic)
-  - 文章整形・校正に優れる
-  - ストリーミングレスポンス対応
-- **OpenAI GPT API**
-  - GPT-4/GPT-3.5
-  - Function Calling対応
+- **groq api (gpt-oss-120b)**
+  - めっちゃ速い
 
 ### パッケージ依存
 - `@ricky0123/vad-web`: VAD実装
