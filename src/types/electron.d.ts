@@ -14,6 +14,7 @@ declare global {
         platform: string;
         hasElevenLabsKey: boolean;
         hasGroqKey: boolean;
+        deepgramKey: string;
         error?: string;
       }>;
     };

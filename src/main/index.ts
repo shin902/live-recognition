@@ -28,6 +28,7 @@ type ConfigResponse = {
   platform: string;
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
+  deepgramKey: string;
   error?: string;
 };
 
@@ -47,6 +48,7 @@ const registerGetConfigHandler = (): void => {
         platform: process.platform,
         hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
         hasGroqKey: !!process.env.GROQ_API_KEY,
+        deepgramKey: process.env.DEEPGRAM_API_KEY || '', // APIキーを直接渡す（セキュリティ上は注意が必要だが、今回はプロトタイプのため）
       };
     } catch (error) {
       console.error('Failed to get config:', error);
@@ -57,6 +59,7 @@ const registerGetConfigHandler = (): void => {
         platform: process.platform,
         hasElevenLabsKey: false,
         hasGroqKey: false,
+        deepgramKey: '',
       };
     }
   });

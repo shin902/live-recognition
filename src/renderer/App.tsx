@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useState } from 'react';
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
+import { useDeepgram } from './hooks/use-deepgram';
 import { VoiceStatus } from './components/VoiceStatus';
 
 interface ConfigInfo {
@@ -9,6 +10,7 @@ interface ConfigInfo {
   platform: string;
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
+  deepgramKey: string;
   error?: string;
 }
 
@@ -98,16 +100,66 @@ export default function App(): JSX.Element {
     void checkMicPermission();
   }, [loadConfig, checkMicPermission]);
 
+  // Deepgram Hook
+  const { 
+    connect, 
+    disconnect, 
+    sendAudio, 
+    transcript, 
+    interimTranscript, 
+    isConnected: isDeepgramConnected,
+    error: deepgramError 
+  } = useDeepgram();
+
+  // Voice Input Hook
   const { status, isListening, toggleListening, loading: vadLoading } = useVoiceInput({
-    onSpeechEnd: (blob) => {
-      console.log('Generated WAV Blob:', blob);
-      console.log('Size:', (blob.size / 1024).toFixed(2), 'KB');
-      // 次のフェーズでここから Groq API を呼び出す
+    onAudioData: (data) => {
+      // 録音中かつ接続済みなら送信
+      if (isListening && isDeepgramConnected) {
+        sendAudio(data);
+      }
     },
     onError: (err) => {
       setError(`音声入力エラー: ${err}`);
     }
   });
+
+  // Toggle処理: VADとDeepgramの接続を同期させる
+  const handleToggle = useCallback(() => {
+    if (!config?.deepgramKey) {
+      setError('Deepgram APIキーが設定されていません');
+      return;
+    }
+
+    if (isListening) {
+      // 停止処理
+      toggleListening(); // VAD停止
+      disconnect();      // Deepgram切断
+    } else {
+      // 開始処理
+      connect(config.deepgramKey); // Deepgram接続
+      toggleListening();           // VAD開始
+    }
+  }, [isListening, toggleListening, connect, disconnect, config]);
+
+  // Deepgramのエラーを画面に反映
+  useEffect(() => {
+    if (deepgramError) {
+      setError(deepgramError);
+      // エラー時は停止する
+      if (isListening) {
+        toggleListening();
+        disconnect();
+      }
+    }
+  }, [deepgramError, isListening, toggleListening, disconnect]);
+
+  // コンポーネントがアンマウントされる際のクリーンアップ
+  useEffect(() => {
+    return () => {
+      disconnect();
+    };
+  }, [disconnect]);
 
   return (
     <ErrorBoundary>
@@ -139,20 +191,24 @@ export default function App(): JSX.Element {
               <VoiceStatus 
                 status={status}
                 isListening={isListening}
-                onToggle={toggleListening}
+                onToggle={handleToggle}
                 loading={vadLoading}
               />
               
+              {/* テキスト表示エリア */}
+              <div className="transcript-container">
+                {transcript && <span className="transcript-final">{transcript}</span>}
+                {interimTranscript && <span className="transcript-interim"> {interimTranscript}</span>}
+                {!transcript && !interimTranscript && isListening && (
+                  <span className="transcript-placeholder">お話しください...</span>
+                )}
+              </div>
+
               <div className="pills">
-                <span className={`pill ${micPermission === 'granted' ? 'ok' : 'ng'}`}>
-                  マイク: {micPermission === 'granted' ? 'OK' : '要許可'}
-                </span>
-                <span className={`pill ${config.hasGroqKey ? 'ok' : 'ng'}`}>
-                  Groq: {config.hasGroqKey ? 'OK' : '未設定'}
+                <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
+                  DG: {isDeepgramConnected ? 'ON' : 'OFF'}
                 </span>
               </div>
-              
-              <span className="meta">{config.appVersion}</span>
             </div>
           )}
         </div>

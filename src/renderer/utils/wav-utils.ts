@@ -51,3 +51,16 @@ function floatTo16BitPCM(output: DataView, offset: number, input: Float32Array):
     output.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
 }
+
+/**
+ * Float32Array (-1.0 ~ 1.0) を Int16Array (-32768 ~ 32767) に変換する
+ * ストリーミング送信（WebSocket）用
+ */
+export function float32ToInt16(float32Audio: Float32Array): Int16Array {
+  const int16Audio = new Int16Array(float32Audio.length);
+  for (let i = 0; i < float32Audio.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32Audio[i]));
+    int16Audio[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return int16Audio;
+}
