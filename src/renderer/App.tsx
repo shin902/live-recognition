@@ -105,9 +105,9 @@ export default function App(): JSX.Element {
   const [refinedText, setRefinedText] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
-  const pendingTextRef = useRef('');
   const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
-  const isRefiningRef = useRef(false); // 競合状態を防ぐ
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
 
   // Groq API経由でテキスト整形（IPC使用）
   const refineText = useCallback(async (rawText: string): Promise<string> => {
@@ -137,7 +137,7 @@ export default function App(): JSX.Element {
     }
   }, []);
 
-  // 確定テキストを受け取ったら整形キューに追加（重複チェック付き）
+  // 確定テキストを受け取ったら即座に整形開始（非同期）
   const handleFinalTranscript = useCallback(
     async (text: string) => {
       // 既に処理済みのテキストはスキップ
@@ -146,11 +146,26 @@ export default function App(): JSX.Element {
         return;
       }
       
-      console.info('🎯 Final transcript received for refinement:', text);
+      console.info('🎯 Final transcript received, starting refinement immediately:', text);
       processedTranscriptsRef.current.add(text);
-      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
+      
+      // 即座に整形開始（非同期で待たない）
+      void (async () => {
+        try {
+          console.info('🔄 Refining text:', text);
+          const refined = await refineText(text);
+          console.info('✨ Refined result:', refined);
+
+          setRefinedText((prev) => {
+            const newText = prev + (prev ? '\n' : '') + refined;
+            return newText;
+          });
+        } catch (err) {
+          console.error('❌ Refinement error:', err);
+        }
+      })();
     },
-    []
+    [refineText]
   );
 
   // Deepgram Hook
@@ -179,36 +194,13 @@ export default function App(): JSX.Element {
     [isDeepgramConnected, sendAudio]
   );
 
-  // VAD onSpeechEnd時に整形処理を実行（競合状態対策付き）
+  // VAD onSpeechEnd時の処理（transcriptのクリアのみ）
   const handleSpeechEnd = useCallback(
     async (_blob: Blob) => {
-      // 既に整形中の場合はスキップ
-      if (isRefiningRef.current) {
-        console.warn('⏸️  Already refining, skipping this speech end event');
-        return;
-      }
-
-      // 現在の確定テキストを整形
-      const textToRefine = pendingTextRef.current;
-      if (!textToRefine.trim()) {
-        console.info('⏭️  No text to refine');
-        return;
-      }
-
-      isRefiningRef.current = true;
-      try {
-        console.info('🔄 Refining text:', textToRefine);
-        const refined = await refineText(textToRefine);
-        console.info('✨ Refined result:', refined);
-
-        setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
-        pendingTextRef.current = ''; // 整形済みなのでクリア
-        clearTranscript(); // Deepgramのtranscriptもクリア
-      } finally {
-        isRefiningRef.current = false;
-      }
+      console.info('🎤 Speech ended, clearing interim transcript');
+      clearTranscript(); // Deepgramのinterim transcriptをクリア
     },
-    [refineText, clearTranscript]
+    [clearTranscript]
   );
 
   // Voice Input Hook
@@ -277,6 +269,46 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
+  // textareaの高さが変わったらウィンドウをリサイズ
+  useEffect(() => {
+    if (!textareaRef.current) return;
+
+    const updateWindowSize = async () => {
+      if (!textareaRef.current) return;
+      
+      // textareaの高さ + コントロールバーの高さ + padding
+      const textareaHeight = textareaRef.current.scrollHeight;
+      const controlBarHeight = 60;
+      const padding = 24; // 上下のpadding
+      const totalHeight = Math.max(160, textareaHeight + controlBarHeight + padding);
+      
+      try {
+        await window.electronAPI.resizeWindow(totalHeight);
+      } catch (err) {
+        console.error('Failed to resize window:', err);
+      }
+    };
+
+    void updateWindowSize();
+  }, [refinedText]);
+
+  // textareaの自動スクロール
+  useEffect(() => {
+    if (!textareaRef.current || isUserScrolling) return;
+    
+    textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+  }, [refinedText, isUserScrolling]);
+
+  // スクロール検出
+  const handleScroll = useCallback(() => {
+    if (!textareaRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 10;
+    
+    setIsUserScrolling(!isAtBottom);
+  }, []);
+
   // Enterキーで整形済みテキストをアクティブウィンドウに貼り付け
   const handlePasteTranscript = useCallback(async () => {
     // 整形後テキストを優先、なければ整形中のinterimを使用
@@ -314,17 +346,67 @@ export default function App(): JSX.Element {
   return (
     <ErrorBoundary>
       <div className="app-root">
-        <div className="floating-bar" role="status" aria-live="polite">
-          {loading && (
+        {config && !loading && !error && (
+          <>
+            {/* テキストエリア */}
+            <div className="transcript-area-container">
+              <textarea
+                ref={textareaRef}
+                className="transcript-textarea"
+                value={refinedText}
+                onChange={(e) => setRefinedText(e.target.value)}
+                onScroll={handleScroll}
+                placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
+                spellCheck={false}
+              />
+            </div>
+
+            {/* コントロールバー */}
+            <div className="floating-bar" role="status" aria-live="polite">
+              <div className="status-row">
+                <VoiceStatus
+                  status={status}
+                  isListening={isListening}
+                  onToggle={handleToggle}
+                  loading={vadLoading}
+                />
+
+                {/* リアルタイムプレビュー */}
+                <div className="transcript-preview">
+                  {isRefining && <span className="transcript-interim">整形中...</span>}
+                  {refineError && (
+                    <span className="transcript-error" title={refineError}>
+                      整形エラー
+                    </span>
+                  )}
+                  {interimTranscript && !isRefining && (
+                    <span className="transcript-interim">{interimTranscript}</span>
+                  )}
+                </div>
+
+                <div className="pills">
+                  <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
+                    DG: {isDeepgramConnected ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {loading && (
+          <div className="floating-bar" role="status" aria-live="polite">
             <div className="state">
               <span className="icon" aria-hidden>
                 ⏳
               </span>
               <span>設定を読み込み中...</span>
             </div>
-          )}
+          </div>
+        )}
 
-          {error && !vadLoading && (
+        {error && !vadLoading && (
+          <div className="floating-bar" role="status" aria-live="polite">
             <div className="state error" title={error}>
               <span className="icon" aria-hidden>
                 ⚠️
@@ -341,43 +423,8 @@ export default function App(): JSX.Element {
                 再試行
               </button>
             </div>
-          )}
-
-          {config && !loading && !error && (
-            <div className="status-row">
-              <VoiceStatus
-                status={status}
-                isListening={isListening}
-                onToggle={handleToggle}
-                loading={vadLoading}
-              />
-
-              {/* 整形後テキスト表示エリア */}
-              <div className="transcript-container">
-                {refinedText && <span className="transcript-final">{refinedText}</span>}
-                {isRefining && <span className="transcript-interim"> 整形中...</span>}
-                {refineError && (
-                  <span className="transcript-error" title={refineError}>
-                    {' '}
-                    整形エラー
-                  </span>
-                )}
-                {interimTranscript && !isRefining && (
-                  <span className="transcript-interim"> {interimTranscript}</span>
-                )}
-                {!refinedText && !interimTranscript && !isRefining && isListening && (
-                  <span className="transcript-placeholder">お話しください...</span>
-                )}
-              </div>
-
-              <div className="pills">
-                <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
-                  DG: {isDeepgramConnected ? 'ON' : 'OFF'}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );
