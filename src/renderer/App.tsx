@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useR
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
+import { useGroq } from './hooks/use-groq';
 import { VoiceStatus } from './components/VoiceStatus';
 
 interface ConfigInfo {
@@ -11,6 +12,7 @@ interface ConfigInfo {
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
   deepgramKey: string;
+  groqKey: string;
   error?: string;
 }
 
@@ -100,16 +102,32 @@ export default function App(): JSX.Element {
     void checkMicPermission();
   }, [loadConfig, checkMicPermission]);
 
+  // 整形済みテキストの状態
+  const [refinedText, setRefinedText] = useState('');
+  const pendingTextRef = useRef('');
+
+  // Groq Hook
+  const { refineText, isRefining } = useGroq(config?.groqKey || '');
+
+  // 確定テキストを受け取ったら整形キューに追加
+  const handleFinalTranscript = useCallback(
+    async (text: string) => {
+      console.log('🎯 Final transcript received for refinement:', text);
+      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
+    },
+    []
+  );
+
   // Deepgram Hook
   const {
     connect,
     disconnect,
     sendAudio,
-    transcript,
     interimTranscript,
     isConnected: isDeepgramConnected,
     error: deepgramError,
-  } = useDeepgram();
+    clearTranscript,
+  } = useDeepgram({ onFinalTranscript: handleFinalTranscript });
 
   // onAudioDataコールバックをuseCallbackでメモ化
   const handleAudioData = useCallback(
@@ -126,6 +144,27 @@ export default function App(): JSX.Element {
     [isDeepgramConnected, sendAudio]
   );
 
+  // VAD onSpeechEnd時に整形処理を実行
+  const handleSpeechEnd = useCallback(
+    async (_blob: Blob) => {
+      // 現在の確定テキストを整形
+      const textToRefine = pendingTextRef.current;
+      if (!textToRefine.trim()) {
+        console.log('⏭️  No text to refine');
+        return;
+      }
+
+      console.log('🔄 Refining text:', textToRefine);
+      const refined = await refineText(textToRefine);
+      console.log('✨ Refined result:', refined);
+
+      setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
+      pendingTextRef.current = ''; // 整形済みなのでクリア
+      clearTranscript(); // Deepgramのtranscriptもクリア
+    },
+    [refineText, clearTranscript]
+  );
+
   // Voice Input Hook
   const {
     status,
@@ -134,6 +173,7 @@ export default function App(): JSX.Element {
     loading: vadLoading,
   } = useVoiceInput({
     onAudioData: handleAudioData,
+    onSpeechEnd: handleSpeechEnd,
     onError: (err) => {
       setError(`音声入力エラー: ${err}`);
     },
@@ -191,17 +231,18 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
-  // Enterキーで文字起こし内容をアクティブウィンドウに貼り付け
+  // Enterキーで整形済みテキストをアクティブウィンドウに貼り付け
   const handlePasteTranscript = useCallback(async () => {
-    const textToPaste = transcript || interimTranscript;
+    // 整形後テキストを優先、なければ整形中のinterimを使用
+    const textToPaste = refinedText || interimTranscript;
     if (!textToPaste) return;
 
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
       if (result.success) {
-        // 貼り付け成功後、トランスクリプトをクリア
-        // Note: useDeepgramのsetTranscriptが外部から呼べないため、ここでは何もしない
         console.log('✅ Pasted transcript to active window');
+        setRefinedText(''); // 貼り付け後にクリア
+        clearTranscript();
       } else {
         console.error('❌ Failed to paste:', result.error);
         setError(`貼り付けに失敗しました: ${result.error}`);
@@ -210,7 +251,7 @@ export default function App(): JSX.Element {
       console.error('❌ Paste error:', err);
       setError('貼り付けに失敗しました');
     }
-  }, [transcript, interimTranscript]);
+  }, [refinedText, interimTranscript, clearTranscript]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -265,13 +306,14 @@ export default function App(): JSX.Element {
                 loading={vadLoading}
               />
 
-              {/* テキスト表示エリア */}
+              {/* 整形後テキスト表示エリア */}
               <div className="transcript-container">
-                {transcript && <span className="transcript-final">{transcript}</span>}
-                {interimTranscript && (
+                {refinedText && <span className="transcript-final">{refinedText}</span>}
+                {isRefining && <span className="transcript-interim"> 整形中...</span>}
+                {interimTranscript && !isRefining && (
                   <span className="transcript-interim"> {interimTranscript}</span>
                 )}
-                {!transcript && !interimTranscript && isListening && (
+                {!refinedText && !interimTranscript && !isRefining && isListening && (
                   <span className="transcript-placeholder">お話しください...</span>
                 )}
               </div>

@@ -15,6 +15,7 @@ declare global {
         hasElevenLabsKey: boolean;
         hasGroqKey: boolean;
         deepgramKey: string;
+        groqKey: string;
         error?: string;
       }>;
       /**

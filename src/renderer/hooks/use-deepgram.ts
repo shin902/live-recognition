@@ -1,13 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-type _DeepgramTranscript = {
-  is_final: boolean;
-  channel: {
-    alternatives: {
-      transcript: string;
-      confidence: number;
-    }[];
-  };
+type UseDeepgramOptions = {
+  onFinalTranscript?: (text: string) => void;
 };
 
 type UseDeepgramReturn = {
@@ -18,15 +12,23 @@ type UseDeepgramReturn = {
   interimTranscript: string;
   isConnected: boolean;
   error: string | null;
+  clearTranscript: () => void;
 };
 
-export function useDeepgram(): UseDeepgramReturn {
+export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn {
+  const { onFinalTranscript } = options;
   const [isConnected, setIsConnected] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const onFinalTranscriptRef = useRef(onFinalTranscript);
+
+  // コールバックをrefで保持
+  useEffect(() => {
+    onFinalTranscriptRef.current = onFinalTranscript;
+  }, [onFinalTranscript]);
 
   const connect = useCallback((apiKey: string) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) return;
@@ -74,6 +76,8 @@ export function useDeepgram(): UseDeepgramReturn {
               console.log('✅ Final transcript:', result.transcript);
               setTranscript((prev) => prev + (prev ? ' ' : '') + result.transcript);
               setInterimTranscript(''); // 確定したら暫定テキストはクリア
+              // コールバックを呼び出し
+              onFinalTranscriptRef.current?.(result.transcript);
             } else {
               console.log('🔄 Interim transcript:', result.transcript);
               setInterimTranscript(result.transcript);
@@ -129,6 +133,11 @@ export function useDeepgram(): UseDeepgramReturn {
     }
   }, []);
 
+  const clearTranscript = useCallback(() => {
+    setTranscript('');
+    setInterimTranscript('');
+  }, []);
+
   // コンポーネントアンマウント時に切断
   useEffect(() => {
     return () => {
@@ -144,5 +153,6 @@ export function useDeepgram(): UseDeepgramReturn {
     interimTranscript,
     isConnected,
     error,
+    clearTranscript,
   };
 }
