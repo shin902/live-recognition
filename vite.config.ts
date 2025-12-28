@@ -12,7 +12,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'src/main/index.ts'),
+        index: path.resolve(__dirname, 'src/main/index.ts'),
         preload: path.resolve(__dirname, 'src/main/preload.ts'),
         renderer: path.resolve(__dirname, 'src/renderer/index.html'),
       },
