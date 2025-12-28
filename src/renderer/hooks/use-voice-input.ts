@@ -25,6 +25,8 @@ export function useVoiceInput({ onSpeechStart, onSpeechEnd, onAudioData, onError
       try {
         const vad = await MicVAD.new({
           startOnLoad: false,
+          baseAssetPath: window.location.href.replace(/index\.html.*$/, ''),
+          onnxWASMBasePath: window.location.href.replace(/index\.html.*$/, ''),
           onSpeechStart: () => {
             if (!mounted) return;
             setStatus('speech_detected');
