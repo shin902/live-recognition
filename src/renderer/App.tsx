@@ -291,6 +291,12 @@ export default function App(): JSX.Element {
   // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
     async (text: string) => {
+      // 空のテキストはスキップ（VADは反応したが音声認識できなかった場合）
+      if (!text.trim()) {
+        console.info('⏭️  Skipping empty transcript');
+        return;
+      }
+      
       // 既に処理済みのテキストはスキップ
       if (processedTranscriptsRef.current.has(text)) {
         console.info('⏭️  Skipping duplicate transcript:', text);
