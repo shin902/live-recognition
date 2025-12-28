@@ -77,6 +77,13 @@ describe('useDeepgram', () => {
     expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
 
     act(() => {
+      socket.onclose?.();
+    });
+
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(socket.send).toHaveBeenCalledTimes(1);
+
+    act(() => {
       socket.triggerMessage(
         JSON.stringify({
           channel: { alternatives: [{ transcript: '聞き取り中' }] },
@@ -198,6 +205,7 @@ describe('useDeepgram', () => {
 
     expect(result.current.transcript).toBe('');
     expect(result.current.interimTranscript).toBe('');
+    expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 });

@@ -16,6 +16,10 @@ type UseDeepgramReturn = {
 };
 
 export const KEEPALIVE_INTERVAL_MS = 10000;
+const isDebug = process.env.NODE_ENV !== 'production';
+const debugLog = (...args: unknown[]) => {
+  if (isDebug) console.log(...args);
+};
 
 export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn {
   const { onFinalTranscript } = options;
@@ -33,7 +37,11 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   }, [onFinalTranscript]);
 
   const connect = useCallback((apiKey: string) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) return;
+    if (
+      socketRef.current?.readyState === WebSocket.OPEN ||
+      socketRef.current?.readyState === WebSocket.CONNECTING
+    )
+      return;
 
     try {
       // nova-2 model, 日本語, スマートフォーマット有効
@@ -44,48 +52,48 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       socketRef.current = socket;
 
       socket.onopen = () => {
-        console.log('Deepgram WebSocket connected');
+        debugLog('Deepgram WebSocket connected');
         setIsConnected(true);
         setError(null);
 
          // KeepAlive (10秒ごとに送信)
-         keepAliveIntervalRef.current = setInterval(() => {
-           if (socket.readyState === WebSocket.OPEN) {
-             socket.send(JSON.stringify({ type: 'KeepAlive' }));
-           }
-         }, KEEPALIVE_INTERVAL_MS);
+        keepAliveIntervalRef.current = setInterval(() => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'KeepAlive' }));
+          }
+        }, KEEPALIVE_INTERVAL_MS);
       };
 
       socket.onmessage = (event) => {
-        console.log('📩 Deepgram message received:', event.data);
+        debugLog('📩 Deepgram message received:', event.data);
         try {
           const data = JSON.parse(event.data);
-          console.log('📊 Parsed data:', data);
+          debugLog('📊 Parsed data:', data);
 
           // メタデータなどはスキップ
           if (data.type === 'Metadata') {
-            console.log('⏭️  Skipping metadata');
+            debugLog('⏭️  Skipping metadata');
             return;
           }
 
           const result = data.channel?.alternatives?.[0];
-          console.log('🔍 Extracted result:', result);
-          console.log('🎯 is_final:', data.is_final);
+          debugLog('🔍 Extracted result:', result);
+          debugLog('🎯 is_final:', data.is_final);
 
           if (result && result.transcript) {
-            console.log('📝 Transcript found:', result.transcript);
+            debugLog('📝 Transcript found:', result.transcript);
             if (data.is_final) {
-              console.log('✅ Final transcript:', result.transcript);
+              debugLog('✅ Final transcript:', result.transcript);
               setTranscript((prev) => prev + (prev ? ' ' : '') + result.transcript);
               setInterimTranscript(''); // 確定したら暫定テキストはクリア
               // コールバックを呼び出し
               onFinalTranscriptRef.current?.(result.transcript);
             } else {
-              console.log('🔄 Interim transcript:', result.transcript);
+              debugLog('🔄 Interim transcript:', result.transcript);
               setInterimTranscript(result.transcript);
             }
           } else {
-            console.log('⚠️  No transcript in result');
+            debugLog('⚠️  No transcript in result');
           }
         } catch (e) {
           console.error('❌ Deepgram parse error:', e);
@@ -93,7 +101,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       };
 
       socket.onclose = () => {
-        console.log('Deepgram WebSocket closed');
+        debugLog('Deepgram WebSocket closed');
         setIsConnected(false);
         if (keepAliveIntervalRef.current) {
           clearInterval(keepAliveIntervalRef.current);
@@ -103,6 +111,10 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       socket.onerror = (e) => {
         console.error('Deepgram WebSocket error:', e);
         setError('Deepgram接続エラーが発生しました');
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current);
+        }
+        setIsConnected(false);
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : '接続に失敗しました');
