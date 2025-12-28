@@ -147,6 +147,8 @@ export default function App(): JSX.Element {
   const sequenceTimestampsRef = useRef<Map<number, number>>(new Map()); // シーケンス開始時刻
   const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
   const isDisplayingRef = useRef(false); // 表示処理中フラグ（競合状態防止）
+  const displayRetryCountRef = useRef(0); // 再試行カウンター
+  const MAX_DISPLAY_RETRIES = 10; // 最大再試行回数
 
   // コンポーネントのアンマウント検出
   useEffect(() => {
@@ -204,6 +206,7 @@ export default function App(): JSX.Element {
       setRefinedText(prev => {
         const parts: string[] = prev ? [prev] : [];
         let shouldRetry = false;
+        let hasDisplayedAny = false;
         
         // 次に表示すべきシーケンスIDから順に処理
         while (completedResultsRef.current.has(nextToDisplayRef.current)) {
@@ -213,6 +216,12 @@ export default function App(): JSX.Element {
           sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
           console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
           nextToDisplayRef.current++;
+          hasDisplayedAny = true;
+        }
+        
+        // 表示があった場合は再試行カウンターをリセット
+        if (hasDisplayedAny) {
+          displayRetryCountRef.current = 0;
         }
         
         // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
@@ -243,9 +252,15 @@ export default function App(): JSX.Element {
           }
         }
         
-        // スキップ後に再試行が必要な場合、次のtickで再実行
+        // スキップ後に再試行が必要な場合、次のtickで再実行（最大回数制限付き）
         if (shouldRetry && isMountedRef.current && !isManuallyEdited) {
-          setTimeout(() => displayCompletedResults(), 0);
+          displayRetryCountRef.current++;
+          if (displayRetryCountRef.current < MAX_DISPLAY_RETRIES) {
+            setTimeout(() => displayCompletedResults(), 0);
+          } else {
+            console.warn(`⚠️  Max display retries (${MAX_DISPLAY_RETRIES}) reached, stopping retry`);
+            displayRetryCountRef.current = 0;
+          }
         }
         
         return parts.join('\n');
@@ -301,9 +316,8 @@ export default function App(): JSX.Element {
 
           if (!isMountedRef.current) return; // アンマウント後は処理しない
 
-          // 整形完了をキューに格納
+          // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
           completedResultsRef.current.set(sequenceId, refined);
-          sequenceTimestampsRef.current.delete(sequenceId);
           
           // 順序通りに表示
           displayCompletedResults();
@@ -314,7 +328,6 @@ export default function App(): JSX.Element {
           
           // エラー時はフォールバックとして元のテキストを使用
           completedResultsRef.current.set(sequenceId, text);
-          sequenceTimestampsRef.current.delete(sequenceId);
           displayCompletedResults();
         }
       })();
