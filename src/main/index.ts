@@ -1,7 +1,6 @@
 import {
   app,
   BrowserWindow,
-  globalShortcut,
   ipcMain,
   Menu,
   MenuItemConstructorOptions,
@@ -62,20 +61,6 @@ const registerGetConfigHandler = (): void => {
     }
   });
   isGetConfigHandlerRegistered = true;
-};
-
-/**
- * アプリ終了用のグローバルショートカットを登録する
- * 登録に失敗した場合はエラーログを出力するが、アプリは継続動作する
- * @param accelerator - ショートカットキー（例: 'CommandOrControl+Q'）
- */
-const registerQuitShortcut = (accelerator: string): void => {
-  const registered = globalShortcut.register(accelerator, () => {
-    app.quit();
-  });
-  if (!registered) {
-    console.error(`Failed to register global shortcut: ${accelerator}. Continuing without it.`);
-  }
 };
 
 // レンダラープロセスの初期化前にIPCハンドラーを登録して競合を防ぐ
@@ -158,10 +143,6 @@ app
       app.dock.hide();
     }
 
-    // フレームレスなので明示的に終了できるショートカットを用意
-    registerQuitShortcut('CommandOrControl+Q');
-    registerQuitShortcut('CommandOrControl+W');
-
     createWindow();
 
     // ディスプレイ変更時にウィンドウ位置を更新
@@ -188,9 +169,7 @@ app.on('before-quit', () => {
   }
 });
 
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
+
 
 app.on('activate', () => {
   // macOSでアプリケーションアイコンがクリックされた際、ウィンドウを再作成
@@ -201,7 +180,7 @@ app.on('activate', () => {
 
 // ログ出力: 環境変数の確認（開発環境かつDEBUG_CONFIG有効時のみ）
 if (process.env.NODE_ENV === 'development' && process.env.DEBUG_CONFIG) {
-  console.info('API Keys status:');
-  console.info(`- ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? 'configured' : 'missing'}`);
-  console.info(`- Groq: ${process.env.GROQ_API_KEY ? 'configured' : 'missing'}`);
+  console.debug('API Keys status:');
+  console.debug(`- ElevenLabs: ${process.env.ELEVENLABS_API_KEY ? 'configured' : 'missing'}`);
+  console.debug(`- Groq: ${process.env.GROQ_API_KEY ? 'configured' : 'missing'}`);
 }
