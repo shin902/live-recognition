@@ -118,8 +118,9 @@ export function useDeepgram(): UseDeepgramReturn {
 
   const sendAudio = useCallback((audioData: Int16Array) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      console.log('🎤 Sending audio data, length:', audioData.length);
-      socketRef.current.send(audioData);
+      console.log('🎤 Sending audio data, length:', audioData.length, 'bytes:', audioData.buffer.byteLength);
+      // ArrayBufferとして送信（Deepgramはバイナリデータを期待）
+      socketRef.current.send(audioData.buffer);
     } else {
       console.warn(
         '⚠️  WebSocket not open, cannot send audio. State:',
