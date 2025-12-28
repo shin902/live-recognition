@@ -132,6 +132,7 @@ export default function App(): JSX.Element {
 
   // 整形済みテキストの状態
   const [refinedText, setRefinedText] = useState('');
+  const refinedTextRef = useRef(''); // 最新のrefinedTextをrefで保持
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const [isManuallyEdited, setIsManuallyEdited] = useState(false); // ユーザー編集フラグ
@@ -283,7 +284,9 @@ export default function App(): JSX.Element {
         });
       }
       
-      return parts.join('');
+      const newText = parts.join('');
+      refinedTextRef.current = newText; // refを更新
+      return newText;
     });
     
     // 新しい音声認識結果が追加されたら手動編集フラグをリセット
@@ -339,8 +342,8 @@ export default function App(): JSX.Element {
       void (async () => {
         try {
           console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
-          // 現在のrefinedTextをコンテキストとして渡す
-          const currentContext = refinedText;
+          // refinedTextRefから最新の文脈を取得
+          const currentContext = refinedTextRef.current;
           const refined = await refineText(text, currentContext);
           // 改行を削除して1行のテキストにする
           const refinedWithoutNewlines = refined.replace(/\n+/g, '');
@@ -580,6 +583,7 @@ export default function App(): JSX.Element {
                 onChange={(e) => {
                   const newValue = e.target.value;
                   setRefinedText(newValue);
+                  refinedTextRef.current = newValue; // refも更新
                   // ユーザーが実際に内容を変更した場合のみフラグを立てる
                   if (newValue !== refinedText) {
                     setIsManuallyEdited(true);
