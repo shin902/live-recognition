@@ -37,6 +37,8 @@ cp .env.example .env
 ```
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 GROQ_API_KEY=your_groq_api_key
+# 開発時のみ: ElectronのDevToolsを開く場合はtrueに設定
+ELECTRON_OPEN_DEVTOOLS=true
 ```
 
 APIキーの取得方法：

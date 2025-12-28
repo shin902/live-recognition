@@ -1,6 +1,16 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  MenuItemConstructorOptions,
+  screen,
+} from 'electron';
 import dotenv from 'dotenv';
 import path from 'path';
+import { computeWindowBounds } from './window-metrics';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -14,18 +24,67 @@ const WINDOW_CONFIG = {
   MARGIN_BOTTOM: 20,
 } as const;
 
-const createWindow = (): void => {
-  // プライマリディスプレイの情報を取得
-  const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+type ConfigResponse = {
+  appVersion: string;
+  nodeVersion: string;
+  platform: string;
+  hasElevenLabsKey: boolean;
+  hasGroqKey: boolean;
+  error?: string;
+};
 
-  // ウィンドウを画面下部中央に配置
-  const x = Math.round((screenWidth - WINDOW_CONFIG.WIDTH) / 2);
-  const y = screenHeight - WINDOW_CONFIG.HEIGHT - WINDOW_CONFIG.MARGIN_BOTTOM;
+const registerGetConfigHandler = (): void => {
+  if (isGetConfigHandlerRegistered) return;
+
+  ipcMain.handle('get-config', async (): Promise<ConfigResponse> => {
+    try {
+      return {
+        appVersion: app.getVersion(),
+        nodeVersion: process.version,
+        platform: process.platform,
+        hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+        hasGroqKey: !!process.env.GROQ_API_KEY,
+      };
+    } catch (error) {
+      console.error('Failed to get config:', error);
+      return {
+        error: 'Failed to retrieve configuration',
+        appVersion: 'unknown',
+        nodeVersion: process.version,
+        platform: process.platform,
+        hasElevenLabsKey: false,
+        hasGroqKey: false,
+      };
+    }
+  });
+  isGetConfigHandlerRegistered = true;
+};
+
+const registerQuitShortcut = (accelerator: string): void => {
+  const registered = globalShortcut.register(accelerator, () => {
+    app.quit();
+  });
+  if (!registered) {
+    const message = `Failed to register global shortcut: ${accelerator}`;
+    console.error(message);
+    dialog.showErrorBox('Critical Error', `${message}. The application will quit.`);
+    app.quit();
+  }
+};
+
+// レンダラープロセスの初期化前にIPCハンドラーを登録して競合を防ぐ
+registerGetConfigHandler();
+
+/**
+ * フローティングウィンドウを生成し、画面下部中央に配置する
+ */
+const createWindow = (): void => {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height, x, y } = computeWindowBounds(primaryDisplay, WINDOW_CONFIG);
 
   mainWindow = new BrowserWindow({
-    width: WINDOW_CONFIG.WIDTH,
-    height: WINDOW_CONFIG.HEIGHT,
+    width,
+    height,
     x,
     y,
     frame: false,
@@ -38,6 +97,7 @@ const createWindow = (): void => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -51,6 +111,12 @@ const createWindow = (): void => {
   // __dirname = dist/main なので、../renderer/index.html で dist/renderer/index.html を指す
   const rendererPath = path.join(__dirname, '..', 'renderer', 'index.html');
   mainWindow.loadFile(rendererPath);
+
+  const menuTemplate: MenuItemConstructorOptions[] = [
+    { label: 'Live Recognition を終了', accelerator: 'CommandOrControl+Q', click: () => app.quit() },
+    { label: 'ウィンドウを閉じる', accelerator: 'CommandOrControl+W', click: () => app.quit() },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
   mainWindow.webContents.on('context-menu', () => {
     const menu = Menu.buildFromTemplate([
@@ -72,36 +138,12 @@ app
       app.dock.hide();
     }
 
-    // フレームレスなので明示的に終了できるショートカットを用意
-    const registered = globalShortcut.register('CommandOrControl+Q', () => {
-      app.quit();
-    });
-    if (!registered) {
-      console.warn('Failed to register global shortcut: CommandOrControl+Q');
-    }
+    // IPCハンドラーを先に準備
+    registerGetConfigHandler();
 
-    ipcMain.handle('get-config', async () => {
-      try {
-        return {
-          appVersion: app.getVersion(),
-          nodeVersion: process.version,
-          platform: process.platform,
-          hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
-          hasGroqKey: !!process.env.GROQ_API_KEY,
-        };
-      } catch (error) {
-        console.error('Failed to get config:', error);
-        return {
-          error: 'Failed to retrieve configuration',
-          appVersion: 'unknown',
-          nodeVersion: process.version,
-          platform: process.platform,
-          hasElevenLabsKey: false,
-          hasGroqKey: false,
-        };
-      }
-    });
-    isGetConfigHandlerRegistered = true;
+    // フレームレスなので明示的に終了できるショートカットを用意
+    registerQuitShortcut('CommandOrControl+Q');
+    registerQuitShortcut('CommandOrControl+W');
 
     createWindow();
   })
@@ -137,7 +179,9 @@ app.on('activate', () => {
 
 // ログ出力: 環境変数の確認（開発環境のみ）
 if (process.env.NODE_ENV === 'development') {
-  console.info('Environment variables loaded:');
-  console.info(`- ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? '設定済み' : '未設定'}`);
+  console.info('Environment variable presence (do not share logs):');
+  console.info(
+    `- ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? '設定済み' : '未設定'}`,
+  );
   console.info(`- GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '設定済み' : '未設定'}`);
 }
