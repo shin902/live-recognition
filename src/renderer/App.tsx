@@ -561,6 +561,88 @@ export default function App(): JSX.Element {
     setIsUserScrolling(!isAtBottom);
   }, []);
 
+  // contentEditableのカーソル位置を保存・復元するヘルパー
+  const saveSelection = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return null;
+    
+    const range = selection.getRangeAt(0);
+    const preSelectionRange = range.cloneRange();
+    if (!textareaRef.current) return null;
+    
+    preSelectionRange.selectNodeContents(textareaRef.current);
+    preSelectionRange.setEnd(range.startContainer, range.startOffset);
+    const start = preSelectionRange.toString().length;
+    
+    return {
+      start,
+      end: start + range.toString().length,
+    };
+  }, []);
+
+  const restoreSelection = useCallback((savedSelection: { start: number; end: number } | null) => {
+    if (!savedSelection || !textareaRef.current) return;
+    
+    const selection = window.getSelection();
+    if (!selection) return;
+    
+    const range = document.createRange();
+    let charIndex = 0;
+    let nodeStack = [textareaRef.current];
+    let node: Node | undefined;
+    let foundStart = false;
+    let stop = false;
+    
+    while (!stop && (node = nodeStack.pop())) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const nextCharIndex = charIndex + (node.textContent?.length || 0);
+        if (!foundStart && savedSelection.start >= charIndex && savedSelection.start <= nextCharIndex) {
+          range.setStart(node, savedSelection.start - charIndex);
+          foundStart = true;
+        }
+        if (foundStart && savedSelection.end >= charIndex && savedSelection.end <= nextCharIndex) {
+          range.setEnd(node, savedSelection.end - charIndex);
+          stop = true;
+        }
+        charIndex = nextCharIndex;
+      } else {
+        let i = node.childNodes.length;
+        while (i--) {
+          nodeStack.push(node.childNodes[i]);
+        }
+      }
+    }
+    
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  // contentEditableのinputハンドラー（カーソル位置保持版）
+  const handleContentEditableInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
+    const savedSelection = saveSelection();
+    const target = e.currentTarget;
+    const newText = target.textContent || '';
+    
+    // バッファ部分を含まない編集のみ受け入れる
+    if (bufferText && newText.endsWith(bufferText)) {
+      // バッファが末尾にある場合、それを除いた部分だけを更新
+      const refinedPart = newText.slice(0, -bufferText.length);
+      setRefinedText(refinedPart);
+      refinedTextRef.current = refinedPart;
+    } else {
+      // バッファが削除された場合は全体を更新
+      setRefinedText(newText);
+      refinedTextRef.current = newText;
+    }
+    
+    setIsManuallyEdited(true);
+    
+    // カーソル位置を復元
+    setTimeout(() => {
+      restoreSelection(savedSelection);
+    }, 0);
+  }, [bufferText, saveSelection, restoreSelection]);
+
   // バッファをフラッシュしてLLMで最終整形する
   const flushBufferAndRefine = useCallback(async () => {
     // バッファに残っているテキストがあれば処理
@@ -660,24 +742,7 @@ export default function App(): JSX.Element {
                 className="transcript-textarea"
                 contentEditable={true}
                 suppressContentEditableWarning={true}
-                onInput={(e) => {
-                  const target = e.currentTarget;
-                  const newText = target.textContent || '';
-                  
-                  // バッファ部分を含まない編集のみ受け入れる
-                  if (bufferText && newText.endsWith(bufferText)) {
-                    // バッファが末尾にある場合、それを除いた部分だけを更新
-                    const refinedPart = newText.slice(0, -bufferText.length);
-                    setRefinedText(refinedPart);
-                    refinedTextRef.current = refinedPart;
-                  } else {
-                    // バッファが削除された場合は全体を更新
-                    setRefinedText(newText);
-                    refinedTextRef.current = newText;
-                  }
-                  
-                  setIsManuallyEdited(true);
-                }}
+                onInput={handleContentEditableInput}
                 onScroll={handleScroll}
                 spellCheck={false}
                 aria-label="文字起こしテキスト"
