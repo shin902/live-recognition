@@ -24,7 +24,8 @@ const createWindow = (): void => {
   }
 
   // レンダラープロセスをロード
-  const rendererPath = path.join(__dirname, '../renderer/index.html');
+  // __dirname = dist/main なので、../renderer/index.html で dist/renderer/index.html を指す
+  const rendererPath = path.join(__dirname, '..', 'renderer', 'index.html');
   mainWindow.loadFile(rendererPath);
 
   mainWindow.on('closed', () => {
@@ -44,6 +45,11 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
+});
+
+app.on('before-quit', () => {
+  // IPCハンドラーのクリーンアップ
+  ipcMain.removeHandler('get-config');
 });
 
 app.on('activate', () => {
