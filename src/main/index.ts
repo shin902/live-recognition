@@ -228,8 +228,9 @@ const registerResizeHandler = (): void => {
 
   ipcMain.handle('resize-window', async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
     try {
-      // 入力値の検証
-      if (typeof height !== 'number' || isNaN(height) || height < 0) {
+      // 入力値の検証（型・範囲）
+      const MAX_REASONABLE_HEIGHT = 10000; // 10000px以上は異常値
+      if (typeof height !== 'number' || isNaN(height) || height < 0 || height > MAX_REASONABLE_HEIGHT) {
         return { success: false, error: 'Invalid height parameter' };
       }
       

@@ -16,13 +16,19 @@ const TRANSCRIPT_CONFIG = {
   RESIZE_DEBOUNCE_MS: 100,
   MAX_SEQUENCE_GAP: 5,
   SEQUENCE_TIMEOUT_MS: 30000,
+  CLEANUP_AGE_MS: 60000, // 1分以上前のエントリをクリーンアップ
 } as const;
 
 // プロンプトテンプレートの検証（起動時に1回のみ）
 const validatePromptTemplate = () => {
-  const count = (refinePromptTemplate.match(/{{text}}/g) || []).length;
-  if (count !== 1) {
-    throw new Error('Invalid prompt template: {{text}} placeholder must appear exactly once');
+  try {
+    const count = (refinePromptTemplate.match(/{{text}}/g) || []).length;
+    if (count !== 1) {
+      throw new Error('Invalid prompt template: {{text}} placeholder must appear exactly once');
+    }
+  } catch (error) {
+    console.error('Failed to validate prompt template:', error);
+    throw error;
   }
 };
 validatePromptTemplate();
@@ -154,8 +160,10 @@ export default function App(): JSX.Element {
     }
 
     refiningCountRef.current++;
-    setIsRefining(refiningCountRef.current > 0);
-    setRefineError(null);
+    if (isMountedRef.current) {
+      setIsRefining(refiningCountRef.current > 0);
+      setRefineError(null);
+    }
 
     try {
       const prompt = refinePromptTemplate.replace('{{text}}', rawText);
@@ -168,12 +176,16 @@ export default function App(): JSX.Element {
       return result.text || rawText;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : '整形に失敗しました';
-      setRefineError(errorMsg);
+      if (isMountedRef.current) {
+        setRefineError(errorMsg);
+      }
       console.error('Groq refine error:', err);
       return rawText;
     } finally {
       refiningCountRef.current--;
-      setIsRefining(refiningCountRef.current > 0);
+      if (isMountedRef.current) {
+        setIsRefining(refiningCountRef.current > 0);
+      }
     }
   }, []);
 
@@ -249,10 +261,19 @@ export default function App(): JSX.Element {
       processedTranscriptsRef.current.add(text);
       sequenceTimestampsRef.current.set(sequenceId, startTime);
       
-      // メモリリーク防止: 古いエントリを削除
+      // メモリリーク防止: 古いエントリを削除（サイズベース）
       if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
         const entries = Array.from(processedTranscriptsRef.current);
         processedTranscriptsRef.current = new Set(entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2)));
+      }
+      
+      // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
+      const now = Date.now();
+      for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          sequenceTimestampsRef.current.delete(seqId);
+          completedResultsRef.current.delete(seqId);
+        }
       }
       
       // 即座に整形開始（非同期で待たない）
@@ -390,20 +411,21 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (!textareaRef.current) return;
 
+    // 早期リターン: 高さが変わっていない場合はタイマーすら設定しない
+    const newHeight = textareaRef.current.scrollHeight;
+    if (newHeight === prevHeightRef.current) {
+      return;
+    }
+
     const timeoutId = setTimeout(async () => {
       if (!textareaRef.current) return;
       
-      const newHeight = textareaRef.current.scrollHeight;
+      const currentHeight = textareaRef.current.scrollHeight;
+      prevHeightRef.current = currentHeight;
       
-      // 高さが変わっていない場合はリサイズをスキップ
-      if (newHeight === prevHeightRef.current) {
-        return;
-      }
-      
-      prevHeightRef.current = newHeight;
       const totalHeight = Math.max(
         TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT, 
-        newHeight + TRANSCRIPT_CONFIG.CONTROL_BAR_HEIGHT + TRANSCRIPT_CONFIG.VERTICAL_PADDING
+        currentHeight + TRANSCRIPT_CONFIG.CONTROL_BAR_HEIGHT + TRANSCRIPT_CONFIG.VERTICAL_PADDING
       );
       
       try {
@@ -488,6 +510,9 @@ export default function App(): JSX.Element {
                 onScroll={handleScroll}
                 placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
                 spellCheck={false}
+                aria-label="文字起こしテキスト"
+                aria-live="polite"
+                aria-atomic="false"
               />
             </div>
 
