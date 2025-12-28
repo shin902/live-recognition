@@ -228,6 +228,11 @@ const registerResizeHandler = (): void => {
 
   ipcMain.handle('resize-window', async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
     try {
+      // 入力値の検証
+      if (typeof height !== 'number' || isNaN(height) || height < 0) {
+        return { success: false, error: 'Invalid height parameter' };
+      }
+      
       if (!mainWindow) {
         return { success: false, error: 'Window not found' };
       }
@@ -389,6 +394,10 @@ app.on('before-quit', () => {
   if (isGroqHandlerRegistered) {
     ipcMain.removeHandler('groq:refine-text');
     isGroqHandlerRegistered = false;
+  }
+  if (isResizeHandlerRegistered) {
+    ipcMain.removeHandler('resize-window');
+    isResizeHandlerRegistered = false;
   }
 });
 
