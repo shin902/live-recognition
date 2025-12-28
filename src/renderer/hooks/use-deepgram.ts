@@ -43,6 +43,14 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
     )
       return;
 
+    if (
+      socketRef.current &&
+      (socketRef.current.readyState === WebSocket.CLOSING ||
+        socketRef.current.readyState === WebSocket.CLOSED)
+    ) {
+      socketRef.current = null;
+    }
+
     try {
       // nova-2 model, 日本語, スマートフォーマット有効
       const url =
@@ -105,7 +113,9 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
         setIsConnected(false);
         if (keepAliveIntervalRef.current) {
           clearInterval(keepAliveIntervalRef.current);
+          keepAliveIntervalRef.current = null;
         }
+        socketRef.current = null;
       };
 
       socket.onerror = (e) => {
@@ -113,8 +123,10 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
         setError('Deepgram接続エラーが発生しました');
         if (keepAliveIntervalRef.current) {
           clearInterval(keepAliveIntervalRef.current);
+          keepAliveIntervalRef.current = null;
         }
         setIsConnected(false);
+        socketRef.current = null;
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : '接続に失敗しました');

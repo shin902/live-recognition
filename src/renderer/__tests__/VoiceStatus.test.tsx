@@ -21,14 +21,14 @@ describe('VoiceStatus', () => {
     rerender(
       <VoiceStatus status="listening" isListening={true} loading={false} onToggle={onToggle} />
     );
-    expect(screen.getByText('聞き取り中...')).toBeTruthy();
+    expect(screen.getByText('聞き取り中...')).toBeInTheDocument();
     expect(screen.getByRole('button').className).toContain('active');
     expect(screen.getByRole('button').getAttribute('title')).toBe('録音停止');
 
     rerender(
       <VoiceStatus status="error" isListening={true} loading={true} onToggle={onToggle} />
     );
-    expect(screen.getByText('エラー')).toBeTruthy();
+    expect(screen.getByText('エラー')).toBeInTheDocument();
     expect(screen.getByRole('button').hasAttribute('disabled')).toBe(true);
   });
 });

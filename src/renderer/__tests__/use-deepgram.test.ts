@@ -73,16 +73,6 @@ describe('useDeepgram', () => {
     expect(result.current.isConnected).toBe(true);
     expect(result.current.error).toBeNull();
 
-    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
-
-    act(() => {
-      socket.onclose?.();
-    });
-
-    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
-    expect(socket.send).toHaveBeenCalledTimes(1);
-
     act(() => {
       socket.triggerMessage(
         JSON.stringify({
@@ -121,7 +111,19 @@ describe('useDeepgram', () => {
       result.current.sendAudio(new Int16Array([1, 2, 3]));
     });
 
-    expect(socket.send).toHaveBeenCalledWith(expect.any(ArrayBuffer));
+    const calls = socket.send.mock.calls;
+    const hasBinary = calls.some((c) => c[0] instanceof ArrayBuffer);
+    expect(hasBinary).toBe(true);
+
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
+    const countBeforeClose = socket.send.mock.calls.length;
+    act(() => {
+      socket.onclose?.();
+    });
+
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(socket.send).toHaveBeenCalledTimes(countBeforeClose);
   });
 
   it('handles errors and closes connection', async () => {
@@ -149,11 +151,7 @@ describe('useDeepgram', () => {
 
     expect(result.current.isConnected).toBe(false);
 
-    act(() => {
-      result.current.disconnect();
-    });
-
-    expect(socket.close).toHaveBeenCalled();
+    expect(result.current.error).toBe('Deepgram接続エラーが発生しました');
   });
 
   it('does not reconnect when already connected', () => {
@@ -185,6 +183,34 @@ describe('useDeepgram', () => {
 
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  it('clears transcripts', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    act(() => {
+      result.current.connect('api-key');
+    });
+    const socket = MockWebSocket.instances[0];
+    act(() => socket.triggerOpen());
+
+    act(() => {
+      socket.triggerMessage(
+        JSON.stringify({
+          channel: { alternatives: [{ transcript: 'a' }] },
+          is_final: true,
+        })
+      );
+    });
+
+    expect(result.current.transcript).toBe('a');
+
+    act(() => {
+      result.current.clearTranscript();
+    });
+
+    expect(result.current.transcript).toBe('');
+    expect(result.current.interimTranscript).toBe('');
   });
 
   it('ignores malformed JSON messages', () => {
