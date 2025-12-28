@@ -654,62 +654,54 @@ export default function App(): JSX.Element {
         {config && !loading && !error && (
           <>
             {/* テキストエリア */}
-            <div className="transcript-area-container" style={{ position: 'relative' }}>
-              {/* 編集用のtextarea */}
-              <textarea
-                ref={textareaRef}
+            <div className="transcript-area-container">
+              <div
+                ref={textareaRef as any}
                 className="transcript-textarea"
-                value={refinedText + (bufferText ? bufferText : '')}
-                onChange={(e) => {
-                  const newValue = e.target.value;
-                  // バッファ分を除いた部分だけをrefinedTextとして扱う
-                  const refinedPart = bufferText && newValue.endsWith(bufferText) 
-                    ? newValue.slice(0, -bufferText.length)
-                    : newValue;
-                  setRefinedText(refinedPart);
-                  refinedTextRef.current = refinedPart;
-                  if (refinedPart !== refinedText) {
-                    setIsManuallyEdited(true);
+                contentEditable={true}
+                suppressContentEditableWarning={true}
+                onInput={(e) => {
+                  const target = e.currentTarget;
+                  const newText = target.textContent || '';
+                  
+                  // バッファ部分を含まない編集のみ受け入れる
+                  if (bufferText && newText.endsWith(bufferText)) {
+                    // バッファが末尾にある場合、それを除いた部分だけを更新
+                    const refinedPart = newText.slice(0, -bufferText.length);
+                    setRefinedText(refinedPart);
+                    refinedTextRef.current = refinedPart;
+                  } else {
+                    // バッファが削除された場合は全体を更新
+                    setRefinedText(newText);
+                    refinedTextRef.current = newText;
                   }
+                  
+                  setIsManuallyEdited(true);
                 }}
                 onScroll={handleScroll}
-                placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
                 spellCheck={false}
                 aria-label="文字起こしテキスト"
                 aria-live="polite"
                 aria-atomic="false"
                 aria-busy={isRefining}
                 style={{
-                  color: 'transparent',
-                  caretColor: '#fff',
-                  position: 'relative',
-                  zIndex: 1,
-                }}
-              />
-              {/* 表示用のdiv（色分け可能） */}
-              <div
-                className="transcript-display"
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  padding: '12px 16px',
-                  fontSize: '14px',
-                  lineHeight: '1.6',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                  color: '#fff',
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                  overflowY: 'auto',
-                  pointerEvents: 'none',
-                  boxSizing: 'border-box',
-                  zIndex: 2,
+                  outline: 'none',
+                  minHeight: '80px',
                 }}
               >
                 <span style={{ color: '#fff' }}>{refinedText}</span>
-                <span style={{ color: 'rgba(255, 255, 255, 0.4)' }}>{bufferText}</span>
+                <span 
+                  style={{ color: 'rgba(255, 255, 255, 0.4)', userSelect: 'none' }}
+                  contentEditable={false}
+                  suppressContentEditableWarning={true}
+                >
+                  {bufferText}
+                </span>
+                {!refinedText && !bufferText && (
+                  <span style={{ color: 'rgba(255, 255, 255, 0.3)', position: 'absolute', pointerEvents: 'none' }}>
+                    {isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
+                  </span>
+                )}
               </div>
             </div>
 
