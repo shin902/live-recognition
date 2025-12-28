@@ -197,13 +197,13 @@ export default function App(): JSX.Element {
   // 完了した整形結果を順序通りに表示（タイムアウト・ギャップ処理付き）
   const displayCompletedResults = useCallback(() => {
     if (!isMountedRef.current) return; // アンマウント後は実行しない
-    if (isManuallyEdited) return; // ユーザー編集中は自動更新を停止
     if (isDisplayingRef.current) return; // 既に表示処理中の場合はスキップ（競合状態防止）
     
     isDisplayingRef.current = true;
     const now = Date.now();
     
     setRefinedText(prev => {
+      // 手動編集されている場合は既存のテキストをそのまま保持しつつ、新しい音声認識結果を追加
       const parts: string[] = prev ? [prev] : [];
       let shouldRetry = false;
       let hasDisplayedAny = false;
@@ -257,7 +257,7 @@ export default function App(): JSX.Element {
       }
       
       // スキップ後に再試行が必要な場合、次のtickで再実行（最大回数制限付き）
-      if (shouldRetry && isMountedRef.current && !isManuallyEdited) {
+      if (shouldRetry && isMountedRef.current) {
         displayRetryCountRef.current++;
         if (displayRetryCountRef.current < MAX_DISPLAY_RETRIES) {
           // queueMicrotaskでフラグクリア後に再試行をスケジュール
@@ -279,9 +279,14 @@ export default function App(): JSX.Element {
         });
       }
       
-      return parts.join('\n');
+      return parts.join('');
     });
-  }, [isManuallyEdited]);
+    
+    // 新しい音声認識結果が追加されたら手動編集フラグをリセット
+    if (completedResultsRef.current.size > 0) {
+      setIsManuallyEdited(false);
+    }
+  }, []);
 
   // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
@@ -325,12 +330,14 @@ export default function App(): JSX.Element {
         try {
           console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
           const refined = await refineText(text);
-          console.info(`✨ Refined result [seq:${sequenceId}]:`, refined);
+          // 改行を削除して1行のテキストにする
+          const refinedWithoutNewlines = refined.replace(/\n+/g, '');
+          console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
 
           if (!isMountedRef.current) return; // アンマウント後は処理しない
 
           // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
-          completedResultsRef.current.set(sequenceId, refined);
+          completedResultsRef.current.set(sequenceId, refinedWithoutNewlines);
           
           // 順序通りに表示
           displayCompletedResults();
@@ -559,8 +566,12 @@ export default function App(): JSX.Element {
                 className="transcript-textarea"
                 value={refinedText}
                 onChange={(e) => {
-                  setRefinedText(e.target.value);
-                  setIsManuallyEdited(true);
+                  const newValue = e.target.value;
+                  setRefinedText(newValue);
+                  // ユーザーが実際に内容を変更した場合のみフラグを立てる
+                  if (newValue !== refinedText) {
+                    setIsManuallyEdited(true);
+                  }
                 }}
                 onScroll={handleScroll}
                 placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
