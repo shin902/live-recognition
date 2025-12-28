@@ -5,6 +5,35 @@ import { useDeepgram } from './hooks/use-deepgram';
 import { VoiceStatus } from './components/VoiceStatus';
 import refinePromptTemplate from './prompts/refine-text.txt?raw';
 
+// 定数（モジュールスコープ）
+const TRANSCRIPT_CONFIG = {
+  MAX_PROCESSED: 100,
+  MAX_PASTE_LENGTH: 10000,
+  CONTROL_BAR_HEIGHT: 60,
+  VERTICAL_PADDING: 24,
+  SCROLL_BOTTOM_THRESHOLD: 10,
+  MIN_WINDOW_HEIGHT: 160,
+  RESIZE_DEBOUNCE_MS: 100,
+  MAX_SEQUENCE_GAP: 5,
+  SEQUENCE_TIMEOUT_MS: 30000,
+  CLEANUP_AGE_MS: 60000, // 1分以上前のエントリをクリーンアップ
+  MAX_COMPLETED_RESULTS: 20, // completedResultsRefの最大サイズ
+} as const;
+
+// プロンプトテンプレートの検証（起動時に1回のみ）
+const validatePromptTemplate = () => {
+  try {
+    const count = (refinePromptTemplate.match(/{{text}}/g) || []).length;
+    if (count !== 1) {
+      throw new Error('Invalid prompt template: {{text}} placeholder must appear exactly once');
+    }
+  } catch (error) {
+    console.error('Failed to validate prompt template:', error);
+    throw error;
+  }
+};
+validatePromptTemplate();
+
 interface ConfigInfo {
   appVersion: string;
   nodeVersion: string;
@@ -105,9 +134,29 @@ export default function App(): JSX.Element {
   const [refinedText, setRefinedText] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
-  const pendingTextRef = useRef('');
-  const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
-  const isRefiningRef = useRef(false); // 競合状態を防ぐ
+  const [isManuallyEdited, setIsManuallyEdited] = useState(false); // ユーザー編集フラグ
+  const processedTranscriptsRef = useRef<Map<string, number>>(new Map()); // 処理済みテキストとタイムスタンプ
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
+  const refiningCountRef = useRef(0); // 並行実行中の整形処理数
+  const prevHeightRef = useRef(0); // 前回のtextarea高さ
+  const isMountedRef = useRef(true); // コンポーネントのマウント状態
+
+  // 順序保証のためのキュー管理
+  const sequenceIdRef = useRef(0); // 発話のシーケンスID
+  const completedResultsRef = useRef<Map<number, string>>(new Map()); // 完了した整形結果
+  const sequenceTimestampsRef = useRef<Map<number, number>>(new Map()); // シーケンス開始時刻
+  const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
+  const isDisplayingRef = useRef(false); // 表示処理中フラグ（競合状態防止）
+  const displayRetryCountRef = useRef(0); // 再試行カウンター
+  const MAX_DISPLAY_RETRIES = 10; // 最大再試行回数
+
+  // コンポーネントのアンマウント検出
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Groq API経由でテキスト整形（IPC使用）
   const refineText = useCallback(async (rawText: string): Promise<string> => {
@@ -115,8 +164,11 @@ export default function App(): JSX.Element {
       return rawText;
     }
 
-    setIsRefining(true);
-    setRefineError(null);
+    refiningCountRef.current++;
+    if (isMountedRef.current) {
+      setIsRefining(refiningCountRef.current > 0);
+      setRefineError(null);
+    }
 
     try {
       const prompt = refinePromptTemplate.replace('{{text}}', rawText);
@@ -129,15 +181,109 @@ export default function App(): JSX.Element {
       return result.text || rawText;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : '整形に失敗しました';
-      setRefineError(errorMsg);
+      if (isMountedRef.current) {
+        setRefineError(errorMsg);
+      }
       console.error('Groq refine error:', err);
       return rawText;
     } finally {
-      setIsRefining(false);
+      refiningCountRef.current--;
+      if (isMountedRef.current) {
+        setIsRefining(refiningCountRef.current > 0);
+      }
     }
   }, []);
 
-  // 確定テキストを受け取ったら整形キューに追加（重複チェック付き）
+  // 完了した整形結果を順序通りに表示（タイムアウト・ギャップ処理付き）
+  const displayCompletedResults = useCallback(() => {
+    if (!isMountedRef.current) return; // アンマウント後は実行しない
+    if (isManuallyEdited) return; // ユーザー編集中は自動更新を停止
+    if (isDisplayingRef.current) return; // 既に表示処理中の場合はスキップ（競合状態防止）
+    
+    isDisplayingRef.current = true;
+    const now = Date.now();
+    
+    setRefinedText(prev => {
+      const parts: string[] = prev ? [prev] : [];
+      let shouldRetry = false;
+      let hasDisplayedAny = false;
+      
+      // 次に表示すべきシーケンスIDから順に処理
+      while (completedResultsRef.current.has(nextToDisplayRef.current)) {
+        const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
+        parts.push(result);
+        completedResultsRef.current.delete(nextToDisplayRef.current);
+        sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
+        console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
+        nextToDisplayRef.current++;
+        hasDisplayedAny = true;
+      }
+      
+      // 表示があった場合は再試行カウンターをリセット
+      if (hasDisplayedAny) {
+        displayRetryCountRef.current = 0;
+      }
+      
+      // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
+      const gap = sequenceIdRef.current - nextToDisplayRef.current;
+      if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
+        const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
+        
+        if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
+          console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
+          sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
+          nextToDisplayRef.current++;
+          shouldRetry = true;
+        } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
+          console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
+          nextToDisplayRef.current++;
+          shouldRetry = true;
+        }
+      }
+      
+      // メモリリーク防止: completedResultsRefの最大サイズを常に強制
+      if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS) {
+        const sortedEntries = Array.from(completedResultsRef.current.entries())
+          .sort(([a], [b]) => a - b);
+        const toKeep = sortedEntries.slice(-TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS);
+        completedResultsRef.current = new Map(toKeep);
+        
+        // 対応するタイムスタンプもクリーンアップ
+        for (const [seqId] of sequenceTimestampsRef.current) {
+          if (!completedResultsRef.current.has(seqId) && seqId < nextToDisplayRef.current) {
+            sequenceTimestampsRef.current.delete(seqId);
+          }
+        }
+      }
+      
+      // スキップ後に再試行が必要な場合、次のtickで再実行（最大回数制限付き）
+      if (shouldRetry && isMountedRef.current && !isManuallyEdited) {
+        displayRetryCountRef.current++;
+        if (displayRetryCountRef.current < MAX_DISPLAY_RETRIES) {
+          // queueMicrotaskでフラグクリア後に再試行をスケジュール
+          queueMicrotask(() => {
+            isDisplayingRef.current = false;
+            displayCompletedResults();
+          });
+        } else {
+          console.warn(`⚠️  Max display retries (${MAX_DISPLAY_RETRIES}) reached, stopping retry`);
+          displayRetryCountRef.current = 0;
+          queueMicrotask(() => {
+            isDisplayingRef.current = false;
+          });
+        }
+      } else {
+        // 再試行しない場合もフラグをクリア
+        queueMicrotask(() => {
+          isDisplayingRef.current = false;
+        });
+      }
+      
+      return parts.join('\n');
+    });
+  }, [isManuallyEdited]);
+
+  // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
     async (text: string) => {
       // 既に処理済みのテキストはスキップ
@@ -146,11 +292,60 @@ export default function App(): JSX.Element {
         return;
       }
       
-      console.info('🎯 Final transcript received for refinement:', text);
-      processedTranscriptsRef.current.add(text);
-      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
+      const sequenceId = sequenceIdRef.current++;
+      const startTime = Date.now();
+      console.info(`🎯 Final transcript received [seq:${sequenceId}], starting refinement:`, text);
+      processedTranscriptsRef.current.set(text, startTime);
+      sequenceTimestampsRef.current.set(sequenceId, startTime);
+      
+      // メモリリーク防止: 古いエントリを削除（サイズベース）
+      if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
+        const entries = Array.from(processedTranscriptsRef.current.entries());
+        const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
+        processedTranscriptsRef.current = new Map(keepEntries);
+      }
+      
+      // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
+      const now = Date.now();
+      for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          sequenceTimestampsRef.current.delete(seqId);
+          completedResultsRef.current.delete(seqId);
+        }
+      }
+      // processedTranscriptsRefも時間ベースでクリーンアップ
+      for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          processedTranscriptsRef.current.delete(txt);
+        }
+      }
+      
+      // 即座に整形開始（非同期で待たない）
+      void (async () => {
+        try {
+          console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
+          const refined = await refineText(text);
+          console.info(`✨ Refined result [seq:${sequenceId}]:`, refined);
+
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+
+          // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
+          completedResultsRef.current.set(sequenceId, refined);
+          
+          // 順序通りに表示
+          displayCompletedResults();
+        } catch (err) {
+          console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
+          
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+          
+          // エラー時はフォールバックとして元のテキストを使用
+          completedResultsRef.current.set(sequenceId, text);
+          displayCompletedResults();
+        }
+      })();
     },
-    []
+    [refineText, displayCompletedResults]
   );
 
   // Deepgram Hook
@@ -179,36 +374,13 @@ export default function App(): JSX.Element {
     [isDeepgramConnected, sendAudio]
   );
 
-  // VAD onSpeechEnd時に整形処理を実行（競合状態対策付き）
+  // VAD onSpeechEnd時の処理（transcriptのクリアのみ）
   const handleSpeechEnd = useCallback(
     async (_blob: Blob) => {
-      // 既に整形中の場合はスキップ
-      if (isRefiningRef.current) {
-        console.warn('⏸️  Already refining, skipping this speech end event');
-        return;
-      }
-
-      // 現在の確定テキストを整形
-      const textToRefine = pendingTextRef.current;
-      if (!textToRefine.trim()) {
-        console.info('⏭️  No text to refine');
-        return;
-      }
-
-      isRefiningRef.current = true;
-      try {
-        console.info('🔄 Refining text:', textToRefine);
-        const refined = await refineText(textToRefine);
-        console.info('✨ Refined result:', refined);
-
-        setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
-        pendingTextRef.current = ''; // 整形済みなのでクリア
-        clearTranscript(); // Deepgramのtranscriptもクリア
-      } finally {
-        isRefiningRef.current = false;
-      }
+      console.info('🎤 Speech ended, clearing interim transcript');
+      clearTranscript(); // Deepgramのinterim transcriptをクリア
     },
-    [refineText, clearTranscript]
+    [clearTranscript]
   );
 
   // Voice Input Hook
@@ -277,11 +449,65 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
+  // textareaの高さが変わったらウィンドウをリサイズ（デバウンス付き・変更検出）
+  useEffect(() => {
+    if (!textareaRef.current) return;
+
+    // 早期リターン: 高さが変わっていない場合はタイマーすら設定しない
+    const newHeight = textareaRef.current.scrollHeight;
+    if (newHeight === prevHeightRef.current) {
+      return;
+    }
+
+    const timeoutId = setTimeout(async () => {
+      if (!textareaRef.current) return;
+      
+      const currentHeight = textareaRef.current.scrollHeight;
+      prevHeightRef.current = currentHeight;
+      
+      const totalHeight = Math.max(
+        TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT, 
+        currentHeight + TRANSCRIPT_CONFIG.CONTROL_BAR_HEIGHT + TRANSCRIPT_CONFIG.VERTICAL_PADDING
+      );
+      
+      try {
+        await window.electronAPI.resizeWindow(totalHeight);
+      } catch (err) {
+        console.error('Failed to resize window:', err);
+      }
+    }, TRANSCRIPT_CONFIG.RESIZE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeoutId);
+  }, [refinedText]);
+
+  // textareaの自動スクロール
+  useEffect(() => {
+    if (!textareaRef.current || isUserScrolling) return;
+    
+    textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+  }, [refinedText, isUserScrolling]);
+
+  // スクロール検出
+  const handleScroll = useCallback(() => {
+    if (!textareaRef.current) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < TRANSCRIPT_CONFIG.SCROLL_BOTTOM_THRESHOLD;
+    
+    setIsUserScrolling(!isAtBottom);
+  }, []);
+
   // Enterキーで整形済みテキストをアクティブウィンドウに貼り付け
   const handlePasteTranscript = useCallback(async () => {
     // 整形後テキストを優先、なければ整形中のinterimを使用
     const textToPaste = refinedText || interimTranscript;
     if (!textToPaste) return;
+
+    // テキスト長の検証
+    if (textToPaste.length > TRANSCRIPT_CONFIG.MAX_PASTE_LENGTH) {
+      setError(`貼り付けるテキストが長すぎます（最大${TRANSCRIPT_CONFIG.MAX_PASTE_LENGTH}文字）`);
+      return;
+    }
 
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
@@ -314,17 +540,74 @@ export default function App(): JSX.Element {
   return (
     <ErrorBoundary>
       <div className="app-root">
-        <div className="floating-bar" role="status" aria-live="polite">
-          {loading && (
+        {config && !loading && !error && (
+          <>
+            {/* テキストエリア */}
+            <div className="transcript-area-container">
+              <textarea
+                ref={textareaRef}
+                className="transcript-textarea"
+                value={refinedText}
+                onChange={(e) => {
+                  setRefinedText(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
+                onScroll={handleScroll}
+                placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
+                spellCheck={false}
+                aria-label="文字起こしテキスト"
+                aria-live="polite"
+                aria-atomic="false"
+                aria-busy={isRefining}
+              />
+            </div>
+
+            {/* コントロールバー */}
+            <div className="floating-bar" role="status" aria-live="polite">
+              <div className="status-row">
+                <VoiceStatus
+                  status={status}
+                  isListening={isListening}
+                  onToggle={handleToggle}
+                  loading={vadLoading}
+                />
+
+                {/* リアルタイムプレビュー */}
+                <div className="transcript-preview">
+                  {isRefining && <span className="transcript-interim">整形中...</span>}
+                  {refineError && (
+                    <span className="transcript-error" title={refineError}>
+                      整形エラー
+                    </span>
+                  )}
+                  {interimTranscript && !isRefining && (
+                    <span className="transcript-interim">{interimTranscript}</span>
+                  )}
+                </div>
+
+                <div className="pills">
+                  <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
+                    DG: {isDeepgramConnected ? 'ON' : 'OFF'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {loading && (
+          <div className="floating-bar" role="status" aria-live="polite">
             <div className="state">
               <span className="icon" aria-hidden>
                 ⏳
               </span>
               <span>設定を読み込み中...</span>
             </div>
-          )}
+          </div>
+        )}
 
-          {error && !vadLoading && (
+        {error && !vadLoading && (
+          <div className="floating-bar" role="status" aria-live="polite">
             <div className="state error" title={error}>
               <span className="icon" aria-hidden>
                 ⚠️
@@ -341,43 +624,8 @@ export default function App(): JSX.Element {
                 再試行
               </button>
             </div>
-          )}
-
-          {config && !loading && !error && (
-            <div className="status-row">
-              <VoiceStatus
-                status={status}
-                isListening={isListening}
-                onToggle={handleToggle}
-                loading={vadLoading}
-              />
-
-              {/* 整形後テキスト表示エリア */}
-              <div className="transcript-container">
-                {refinedText && <span className="transcript-final">{refinedText}</span>}
-                {isRefining && <span className="transcript-interim"> 整形中...</span>}
-                {refineError && (
-                  <span className="transcript-error" title={refineError}>
-                    {' '}
-                    整形エラー
-                  </span>
-                )}
-                {interimTranscript && !isRefining && (
-                  <span className="transcript-interim"> {interimTranscript}</span>
-                )}
-                {!refinedText && !interimTranscript && !isRefining && isListening && (
-                  <span className="transcript-placeholder">お話しください...</span>
-                )}
-              </div>
-
-              <div className="pills">
-                <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
-                  DG: {isDeepgramConnected ? 'ON' : 'OFF'}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   );

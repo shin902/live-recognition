@@ -12,7 +12,7 @@ let isGetConfigHandlerRegistered = false;
 
 const WINDOW_CONFIG = {
   WIDTH: 600,
-  HEIGHT: 60,
+  HEIGHT: 160,
   MARGIN_BOTTOM: 20,
 } as const;
 
@@ -220,6 +220,52 @@ const registerPasteHandler = (): void => {
 registerPasteHandler();
 
 /**
+ * ウィンドウの高さをリサイズするIPCハンドラー
+ */
+let isResizeHandlerRegistered = false;
+const registerResizeHandler = (): void => {
+  if (isResizeHandlerRegistered) return;
+
+  ipcMain.handle('resize-window', async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // 入力値の検証（型・範囲・有限数）
+      const MAX_REASONABLE_HEIGHT = 10000; // 10000px以上は異常値
+      if (typeof height !== 'number' || !isFinite(height) || height < 0 || height > MAX_REASONABLE_HEIGHT) {
+        console.warn('Invalid resize attempt:', { height, type: typeof height });
+        return { success: false, error: 'Invalid height parameter' };
+      }
+      
+      if (!mainWindow) {
+        return { success: false, error: 'Window not found' };
+      }
+
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { height: screenHeight } = primaryDisplay.workAreaSize;
+      const width = WINDOW_CONFIG.WIDTH;
+      
+      // 最小・最大高さの制約
+      const MIN_HEIGHT = 160;
+      const MAX_HEIGHT = Math.floor(screenHeight * 0.8);
+      const constrainedHeight = Math.max(MIN_HEIGHT, Math.min(height, MAX_HEIGHT));
+      
+      // Y座標を再計算（画面下部中央を維持）
+      const x = Math.round((primaryDisplay.workAreaSize.width - width) / 2);
+      const y = Math.max(0, screenHeight - constrainedHeight - WINDOW_CONFIG.MARGIN_BOTTOM);
+      
+      mainWindow.setBounds({ width, height: constrainedHeight, x, y });
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Resize handler error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+  isResizeHandlerRegistered = true;
+};
+
+registerResizeHandler();
+
+/**
  * フローティングウィンドウを生成し、画面下部中央に配置する
  */
 const createWindow = (): void => {
@@ -350,6 +396,10 @@ app.on('before-quit', () => {
   if (isGroqHandlerRegistered) {
     ipcMain.removeHandler('groq:refine-text');
     isGroqHandlerRegistered = false;
+  }
+  if (isResizeHandlerRegistered) {
+    ipcMain.removeHandler('resize-window');
+    isResizeHandlerRegistered = false;
   }
 });
 

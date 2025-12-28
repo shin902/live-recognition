@@ -36,6 +36,15 @@ declare global {
         text?: string;
         error?: string;
       }>;
+      /**
+       * ウィンドウの高さをリサイズする
+       * @param height 新しい高さ（ピクセル）
+       * @returns 結果オブジェクト
+       */
+      resizeWindow: (height: number) => Promise<{
+        success: boolean;
+        error?: string;
+      }>;
     };
   }
 }
