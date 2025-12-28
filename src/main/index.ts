@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -8,9 +8,30 @@ dotenv.config();
 let mainWindow: BrowserWindow | null = null;
 
 const createWindow = (): void => {
+  // ウィンドウサイズとマージン
+  const windowWidth = 600;
+  const windowHeight = 60;
+  const marginBottom = 20;
+
+  // プライマリディスプレイの情報を取得
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
+  // ウィンドウを画面下部中央に配置
+  const x = Math.round((screenWidth - windowWidth) / 2);
+  const y = screenHeight - windowHeight - marginBottom;
+
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: windowWidth,
+    height: windowHeight,
+    x,
+    y,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -35,7 +56,13 @@ const createWindow = (): void => {
 
 app
   .whenReady()
-  .then(createWindow)
+  .then(() => {
+    // macOSでDockアイコンを非表示化
+    if (process.platform === 'darwin') {
+      app.dock.hide();
+    }
+    createWindow();
+  })
   .catch((error: Error) => {
     console.error('Failed to create window:', error);
   });
