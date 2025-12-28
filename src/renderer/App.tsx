@@ -658,13 +658,16 @@ export default function App(): JSX.Element {
               <textarea
                 ref={textareaRef}
                 className="transcript-textarea"
-                value={refinedText}
+                value={refinedText + (bufferText ? bufferText : '')}
                 onChange={(e) => {
                   const newValue = e.target.value;
-                  setRefinedText(newValue);
-                  refinedTextRef.current = newValue; // refも更新
-                  // ユーザーが実際に内容を変更した場合のみフラグを立てる
-                  if (newValue !== refinedText) {
+                  // バッファ分を除いた部分だけをrefinedTextとして扱う
+                  const refinedPart = bufferText && newValue.endsWith(bufferText) 
+                    ? newValue.slice(0, -bufferText.length)
+                    : newValue;
+                  setRefinedText(refinedPart);
+                  refinedTextRef.current = refinedPart;
+                  if (refinedPart !== refinedText) {
                     setIsManuallyEdited(true);
                   }
                 }}
@@ -675,25 +678,12 @@ export default function App(): JSX.Element {
                 aria-live="polite"
                 aria-atomic="false"
                 aria-busy={isRefining}
+                style={{
+                  background: 'linear-gradient(to right, rgba(0, 0, 0, 0.85) ' + 
+                    (refinedText.length / (refinedText.length + bufferText.length) * 100) + '%, rgba(0, 0, 0, 0.7) ' +
+                    (refinedText.length / (refinedText.length + bufferText.length) * 100) + '%)'
+                }}
               />
-              {/* バッファテキストをオーバーレイ表示 */}
-              {bufferText && (
-                <div 
-                  style={{
-                    position: 'absolute',
-                    bottom: '72px',
-                    left: '12px',
-                    right: '12px',
-                    padding: '12px 16px',
-                    color: 'rgba(255, 255, 255, 0.4)',
-                    fontSize: '14px',
-                    pointerEvents: 'none',
-                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                  }}
-                >
-                  {bufferText}
-                </div>
-              )}
             </div>
 
             {/* コントロールバー */}
