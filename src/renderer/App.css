@@ -187,6 +187,11 @@ body {
   font-style: italic;
 }
 
+.transcript-error {
+  color: #f87171;
+  font-size: 12px;
+}
+
 .transcript-placeholder {
   color: #64748b;
   font-size: 13px;

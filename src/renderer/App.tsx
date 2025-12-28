@@ -3,6 +3,7 @@ import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
 import { VoiceStatus } from './components/VoiceStatus';
+import refinePromptTemplate from './prompts/refine-text.txt?raw';
 
 interface ConfigInfo {
   appVersion: string;
@@ -100,30 +101,114 @@ export default function App(): JSX.Element {
     void checkMicPermission();
   }, [loadConfig, checkMicPermission]);
 
+  // 整形済みテキストの状態
+  const [refinedText, setRefinedText] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const pendingTextRef = useRef('');
+  const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
+  const isRefiningRef = useRef(false); // 競合状態を防ぐ
+
+  // Groq API経由でテキスト整形（IPC使用）
+  const refineText = useCallback(async (rawText: string): Promise<string> => {
+    if (!rawText.trim()) {
+      return rawText;
+    }
+
+    setIsRefining(true);
+    setRefineError(null);
+
+    try {
+      const prompt = refinePromptTemplate.replace('{{text}}', rawText);
+      const result = await window.electronAPI.groqRefineText(prompt);
+
+      if (!result.success) {
+        throw new Error(result.error || '整形に失敗しました');
+      }
+
+      return result.text || rawText;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : '整形に失敗しました';
+      setRefineError(errorMsg);
+      console.error('Groq refine error:', err);
+      return rawText;
+    } finally {
+      setIsRefining(false);
+    }
+  }, []);
+
+  // 確定テキストを受け取ったら整形キューに追加（重複チェック付き）
+  const handleFinalTranscript = useCallback(
+    async (text: string) => {
+      // 既に処理済みのテキストはスキップ
+      if (processedTranscriptsRef.current.has(text)) {
+        console.info('⏭️  Skipping duplicate transcript:', text);
+        return;
+      }
+      
+      console.info('🎯 Final transcript received for refinement:', text);
+      processedTranscriptsRef.current.add(text);
+      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
+    },
+    []
+  );
+
   // Deepgram Hook
   const {
     connect,
     disconnect,
     sendAudio,
-    transcript,
     interimTranscript,
     isConnected: isDeepgramConnected,
     error: deepgramError,
-  } = useDeepgram();
+    clearTranscript,
+  } = useDeepgram({ onFinalTranscript: handleFinalTranscript });
 
   // onAudioDataコールバックをuseCallbackでメモ化
   const handleAudioData = useCallback(
     (data: Int16Array) => {
-      console.log('🎙️  Audio data received from VAD, length:', data.length);
+      console.info('🎙️  Audio data received from VAD, length:', data.length);
       // Deepgramに接続済みなら送信
       if (isDeepgramConnected) {
-        console.log('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
+        console.info('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
         sendAudio(data);
       } else {
-        console.log('⏸️  Not sending (connected:', isDeepgramConnected, ')');
+        console.warn('⏸️  Not sending (connected:', isDeepgramConnected, ')');
       }
     },
     [isDeepgramConnected, sendAudio]
+  );
+
+  // VAD onSpeechEnd時に整形処理を実行（競合状態対策付き）
+  const handleSpeechEnd = useCallback(
+    async (_blob: Blob) => {
+      // 既に整形中の場合はスキップ
+      if (isRefiningRef.current) {
+        console.warn('⏸️  Already refining, skipping this speech end event');
+        return;
+      }
+
+      // 現在の確定テキストを整形
+      const textToRefine = pendingTextRef.current;
+      if (!textToRefine.trim()) {
+        console.info('⏭️  No text to refine');
+        return;
+      }
+
+      isRefiningRef.current = true;
+      try {
+        console.info('🔄 Refining text:', textToRefine);
+        const refined = await refineText(textToRefine);
+        console.info('✨ Refined result:', refined);
+
+        setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
+        pendingTextRef.current = ''; // 整形済みなのでクリア
+        clearTranscript(); // Deepgramのtranscriptもクリア
+      } finally {
+        isRefiningRef.current = false;
+      }
+    },
+    [refineText, clearTranscript]
   );
 
   // Voice Input Hook
@@ -134,6 +219,7 @@ export default function App(): JSX.Element {
     loading: vadLoading,
   } = useVoiceInput({
     onAudioData: handleAudioData,
+    onSpeechEnd: handleSpeechEnd,
     onError: (err) => {
       setError(`音声入力エラー: ${err}`);
     },
@@ -141,7 +227,7 @@ export default function App(): JSX.Element {
 
   // Toggle処理: VADとDeepgramの接続を同期させる
   const handleToggle = useCallback(async () => {
-    console.log('🔘 Toggle button clicked. Current state - isListening:', isListening);
+    console.info('🔘 Toggle button clicked. Current state - isListening:', isListening);
 
     if (!config?.deepgramKey) {
       console.error('❌ No Deepgram API key found');
@@ -151,15 +237,15 @@ export default function App(): JSX.Element {
 
     if (isListening) {
       // 停止処理：まずVADを停止してから接続を切断
-      console.log('⏹️  Stopping: VAD and Deepgram');
+      console.info('⏹️  Stopping: VAD and Deepgram');
       await toggleListening(); // VAD停止（非同期）
       disconnect(); // Deepgram切断
     } else {
       // 開始処理：まずDeepgramに接続してからVADを開始
-      console.log('▶️  Starting: Deepgram connection and VAD');
+      console.info('▶️  Starting: Deepgram connection and VAD');
       connect(config.deepgramKey); // Deepgram接続（即座にWebSocket接続開始）
       await toggleListening(); // VAD開始（非同期で待機）
-      console.log('✅ VAD started, now listening');
+      console.info('✅ VAD started, now listening');
     }
   }, [isListening, toggleListening, connect, disconnect, config]);
 
@@ -169,7 +255,7 @@ export default function App(): JSX.Element {
       setError(deepgramError);
       // エラー時は停止する
       if (isListening) {
-        toggleListening();
+        void toggleListening();
         disconnect();
       }
     }
@@ -191,17 +277,18 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
-  // Enterキーで文字起こし内容をアクティブウィンドウに貼り付け
+  // Enterキーで整形済みテキストをアクティブウィンドウに貼り付け
   const handlePasteTranscript = useCallback(async () => {
-    const textToPaste = transcript || interimTranscript;
+    // 整形後テキストを優先、なければ整形中のinterimを使用
+    const textToPaste = refinedText || interimTranscript;
     if (!textToPaste) return;
 
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
       if (result.success) {
-        // 貼り付け成功後、トランスクリプトをクリア
-        // Note: useDeepgramのsetTranscriptが外部から呼べないため、ここでは何もしない
-        console.log('✅ Pasted transcript to active window');
+        console.info('✅ Pasted transcript to active window');
+        setRefinedText(''); // 貼り付け後にクリア
+        clearTranscript();
       } else {
         console.error('❌ Failed to paste:', result.error);
         setError(`貼り付けに失敗しました: ${result.error}`);
@@ -210,7 +297,7 @@ export default function App(): JSX.Element {
       console.error('❌ Paste error:', err);
       setError('貼り付けに失敗しました');
     }
-  }, [transcript, interimTranscript]);
+  }, [refinedText, interimTranscript, clearTranscript]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -265,13 +352,20 @@ export default function App(): JSX.Element {
                 loading={vadLoading}
               />
 
-              {/* テキスト表示エリア */}
+              {/* 整形後テキスト表示エリア */}
               <div className="transcript-container">
-                {transcript && <span className="transcript-final">{transcript}</span>}
-                {interimTranscript && (
+                {refinedText && <span className="transcript-final">{refinedText}</span>}
+                {isRefining && <span className="transcript-interim"> 整形中...</span>}
+                {refineError && (
+                  <span className="transcript-error" title={refineError}>
+                    {' '}
+                    整形エラー
+                  </span>
+                )}
+                {interimTranscript && !isRefining && (
                   <span className="transcript-interim"> {interimTranscript}</span>
                 )}
-                {!transcript && !interimTranscript && isListening && (
+                {!refinedText && !interimTranscript && !isRefining && isListening && (
                   <span className="transcript-placeholder">お話しください...</span>
                 )}
               </div>

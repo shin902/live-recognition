@@ -5,8 +5,11 @@
 ## 主な機能
 
 - **リアルタイム音声入力**: マイクから音声を取得し、VAD（Voice Activity Detection）で発話区間を検出
-- **音声認識**: ElevenLabs Realtime APIで音声をテキスト化
-- **文章整形**: Groq APIでテキストを整形・校正
+- **音声認識**: Deepgram Nova-2 APIで日本語音声をリアルタイムにテキスト化
+- **文章整形**: Groq API（GPT-OSS-120B相当）でテキストを整形・校正
+  - フィラー（えー、あのー等）の削除
+  - 適切な句読点の挿入
+  - 誤認識の修正
 - **自動入力**: 整形されたテキストをアクティブなアプリケーションに自動的にキー入力
 
 ## 必要な環境
@@ -14,6 +17,19 @@
 - **OS**: macOS
 - **Node.js**: pnpmがサポートするバージョン（推奨: 20系以上）
 - **pnpm**: 9.0.0以上（miseまたはcorepackで管理）
+
+## 使い方
+
+1. アプリケーションを起動すると、画面下部にフローティングバーが表示されます
+2. マイクアイコンをクリックして音声入力を開始（または自動開始）
+3. 話した内容がリアルタイムで文字起こしされます
+4. 発話が終わると自動的にGroq APIで整形されます
+5. `Enter`キーを押すと、整形されたテキストがアクティブウィンドウに貼り付けられ、アプリが終了します
+
+### プロンプトのカスタマイズ
+
+整形用のプロンプトは `src/renderer/prompts/refine-text.txt` で管理されています。
+必要に応じて編集してください。
 
 ## セットアップ手順
 
@@ -35,15 +51,27 @@ cp .env.example .env
 その後、`.env`ファイルをテキストエディタで開き、APIキーを設定します：
 
 ```
-ELEVENLABS_API_KEY=your_elevenlabs_api_key
+# Deepgram API キー（音声認識用）
+DEEPGRAM_API_KEY=your_deepgram_api_key
+
+# Groq API キー（テキスト整形用）
 GROQ_API_KEY=your_groq_api_key
+
+# オプション: Groq モデル名（デフォルト: meta-llama/llama-4-scout-17b-16e-instruct）
+# GROQ_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+
 # 開発時のみ: ElectronのDevToolsを開く場合はtrueに設定
-ELECTRON_OPEN_DEVTOOLS=true
+# ELECTRON_OPEN_DEVTOOLS=true
 ```
 
 APIキーの取得方法：
-- **ElevenLabs**: https://elevenlabs.io/
-- **Groq**: https://console.groq.com/
+- **Deepgram**: https://console.deepgram.com/ (無料枠: 月200時間)
+- **Groq**: https://console.groq.com/ (無料枠: 月1000万トークン)
+
+⚠️ **セキュリティ注意**: 
+- Deepgram APIキーはレンダラープロセスに直接渡されています（プロトタイプ段階）
+- Groq APIキーはメインプロセスで安全に管理されています
+- 本番環境では全てのAPIキーをメインプロセスで管理することを推奨します
 
 ### 3. 依存パッケージのインストール
 

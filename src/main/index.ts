@@ -16,6 +16,14 @@ const WINDOW_CONFIG = {
   MARGIN_BOTTOM: 20,
 } as const;
 
+// Groq API設定
+const GROQ_CONFIG = {
+  TEMPERATURE: 0.3,
+  MAX_TOKENS: 1024,
+  DEFAULT_MODEL: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  MAX_PROMPT_LENGTH: 4000, // プロンプト長制限
+} as const;
+
 type ConfigResponse = {
   appVersion: string;
   nodeVersion: string;
@@ -62,6 +70,101 @@ const registerGetConfigHandler = (): void => {
 
 // レンダラープロセスの初期化前にIPCハンドラーを登録して競合を防ぐ
 registerGetConfigHandler();
+
+/**
+ * Groq APIでテキストを整形するIPCハンドラー
+ */
+let isGroqHandlerRegistered = false;
+const registerGroqHandler = (): void => {
+  if (isGroqHandlerRegistered) return;
+
+  ipcMain.handle('groq:refine-text', async (_event, text: string): Promise<{ success: boolean; text?: string; error?: string }> => {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return { success: false, error: 'Groq APIキーが設定されていません' };
+    }
+
+    if (!text.trim()) {
+      return { success: true, text };
+    }
+
+    // プロンプト長制限チェック
+    if (text.length > GROQ_CONFIG.MAX_PROMPT_LENGTH) {
+      console.warn(`Prompt too long (${text.length} chars), truncating to ${GROQ_CONFIG.MAX_PROMPT_LENGTH}`);
+      text = text.slice(0, GROQ_CONFIG.MAX_PROMPT_LENGTH);
+    }
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: process.env.GROQ_MODEL || GROQ_CONFIG.DEFAULT_MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: text,
+            },
+          ],
+          temperature: GROQ_CONFIG.TEMPERATURE,
+          max_tokens: GROQ_CONFIG.MAX_TOKENS,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        const errorMessage = 
+          errorData && typeof errorData === 'object' && 'error' in errorData && 
+          errorData.error && typeof errorData.error === 'object' && 'message' in errorData.error
+            ? String(errorData.error.message)
+            : `API error: ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      // レスポンス構造の検証
+      if (!data || typeof data !== 'object') {
+        throw new Error('Invalid API response: not an object');
+      }
+      
+      if (!('choices' in data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+        throw new Error('Invalid API response: missing choices array');
+      }
+      
+      const firstChoice = data.choices[0];
+      if (!firstChoice || typeof firstChoice !== 'object' || !('message' in firstChoice)) {
+        throw new Error('Invalid API response: missing message in choice');
+      }
+      
+      const message = firstChoice.message;
+      if (!message || typeof message !== 'object' || !('content' in message)) {
+        throw new Error('Invalid API response: missing content in message');
+      }
+      
+      const refinedText = typeof message.content === 'string' ? message.content.trim() : '';
+
+      if (!refinedText) {
+        throw new Error('整形結果が空です');
+      }
+
+      return { success: true, text: refinedText };
+    } catch (error) {
+      console.error('Groq refine error:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '整形に失敗しました',
+        text // fallbackとして元のテキストを返す
+      };
+    }
+  });
+  isGroqHandlerRegistered = true;
+};
+
+registerGroqHandler();
 
 /**
  * 文字起こしテキストをコピーし、ウィンドウを閉じて、次のアクティブウィンドウに貼り付けてからアプリを終了
@@ -243,6 +346,10 @@ app.on('before-quit', () => {
   if (isPasteHandlerRegistered) {
     ipcMain.removeHandler('paste-to-active-window');
     isPasteHandlerRegistered = false;
+  }
+  if (isGroqHandlerRegistered) {
+    ipcMain.removeHandler('groq:refine-text');
+    isGroqHandlerRegistered = false;
   }
 });
 
