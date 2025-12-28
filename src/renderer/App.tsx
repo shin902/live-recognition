@@ -109,6 +109,11 @@ export default function App(): JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
 
+  // 順序保証のためのキュー管理
+  const sequenceIdRef = useRef(0); // 発話のシーケンスID
+  const completedResultsRef = useRef<Map<number, string>>(new Map()); // 完了した整形結果
+  const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
+
   // Groq API経由でテキスト整形（IPC使用）
   const refineText = useCallback(async (rawText: string): Promise<string> => {
     if (!rawText.trim()) {
@@ -137,7 +142,27 @@ export default function App(): JSX.Element {
     }
   }, []);
 
-  // 確定テキストを受け取ったら即座に整形開始（非同期）
+  // 完了した整形結果を順序通りに表示
+  const displayCompletedResults = useCallback(() => {
+    let hasNewText = false;
+    let newText = refinedText;
+
+    // 次に表示すべきシーケンスIDから順に処理
+    while (completedResultsRef.current.has(nextToDisplayRef.current)) {
+      const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
+      newText = newText + (newText ? '\n' : '') + result;
+      completedResultsRef.current.delete(nextToDisplayRef.current);
+      nextToDisplayRef.current++;
+      hasNewText = true;
+      console.info(`📝 Displaying sequence ${nextToDisplayRef.current - 1}: ${result}`);
+    }
+
+    if (hasNewText) {
+      setRefinedText(newText);
+    }
+  }, [refinedText]);
+
+  // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
     async (text: string) => {
       // 既に処理済みのテキストはスキップ
@@ -146,26 +171,28 @@ export default function App(): JSX.Element {
         return;
       }
       
-      console.info('🎯 Final transcript received, starting refinement immediately:', text);
+      const sequenceId = sequenceIdRef.current++;
+      console.info(`🎯 Final transcript received [seq:${sequenceId}], starting refinement:`, text);
       processedTranscriptsRef.current.add(text);
       
       // 即座に整形開始（非同期で待たない）
       void (async () => {
         try {
-          console.info('🔄 Refining text:', text);
+          console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
           const refined = await refineText(text);
-          console.info('✨ Refined result:', refined);
+          console.info(`✨ Refined result [seq:${sequenceId}]:`, refined);
 
-          setRefinedText((prev) => {
-            const newText = prev + (prev ? '\n' : '') + refined;
-            return newText;
-          });
+          // 整形完了をキューに格納
+          completedResultsRef.current.set(sequenceId, refined);
+          
+          // 順序通りに表示
+          displayCompletedResults();
         } catch (err) {
-          console.error('❌ Refinement error:', err);
+          console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
         }
       })();
     },
-    [refineText]
+    [refineText, displayCompletedResults]
   );
 
   // Deepgram Hook
