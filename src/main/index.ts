@@ -140,6 +140,16 @@ const createWindow = (): void => {
   });
 };
 
+/**
+ * ディスプレイ変更時にウィンドウ位置を再計算する
+ */
+const updateWindowPosition = (): void => {
+  if (!mainWindow) return;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { x, y } = computeWindowBounds(primaryDisplay, WINDOW_CONFIG);
+  mainWindow.setPosition(x, y);
+};
+
 app
   .whenReady()
   .then(() => {
@@ -153,6 +163,11 @@ app
     registerQuitShortcut('CommandOrControl+W');
 
     createWindow();
+
+    // ディスプレイ変更時にウィンドウ位置を更新
+    screen.on('display-metrics-changed', updateWindowPosition);
+    screen.on('display-added', updateWindowPosition);
+    screen.on('display-removed', updateWindowPosition);
   })
   .catch((error: Error) => {
     console.error('Failed to create window:', error);

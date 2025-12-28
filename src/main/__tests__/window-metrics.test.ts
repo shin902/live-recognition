@@ -57,6 +57,22 @@ describe('computeWindowBounds', () => {
     });
   });
 
+  it('should prevent negative y coordinate on very small screen', () => {
+    const display: DisplayInfo = {
+      workAreaSize: { width: 800, height: 70 },
+      scaleFactor: 1,
+    };
+
+    const result = computeWindowBounds(display, config);
+
+    expect(result).toEqual({
+      width: 600,
+      height: 60,
+      x: 100, // (800 - 600) / 2
+      y: 0, // max(0, 70 - 60 - 20) = max(0, -10) = 0
+    });
+  });
+
   it('should handle 4K display', () => {
     const display: DisplayInfo = {
       workAreaSize: { width: 3840, height: 2160 },

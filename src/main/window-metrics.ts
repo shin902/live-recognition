@@ -9,6 +9,7 @@ export interface DisplayInfo {
     width: number;
     height: number;
   };
+  // scaleFactor は Electron の display オブジェクトとの互換性のため保持
   scaleFactor: number;
 }
 
@@ -32,6 +33,7 @@ export const computeWindowBounds = (
     width,
     height,
     x: Math.round((screenWidth - width) / 2),
-    y: screenHeight - height - marginBottom,
+    // 小画面でのオーバーフローを防ぐため、y座標が負にならないよう境界チェック
+    y: Math.max(0, screenHeight - height - marginBottom),
   };
 };
