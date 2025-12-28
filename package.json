@@ -6,8 +6,10 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "dev": "concurrently \"vite build --watch\" \"wait-on dist/main/index.js && electron .\"",
-    "build": "vite build",
+    "dev": "concurrently \"pnpm run build:main --watch\" \"pnpm run build:renderer\" \"wait-on dist/main/index.js && electron .\"",
+    "build": "pnpm run build:main && pnpm run build:renderer",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",

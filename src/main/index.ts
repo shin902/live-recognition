@@ -61,13 +61,25 @@ app.on('activate', () => {
 
 // IPC通信: 設定情報を取得
 ipcMain.handle('get-config', async () => {
-  return {
-    appVersion: app.getVersion(),
-    nodeVersion: process.version,
-    platform: process.platform,
-    hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
-    hasGroqKey: !!process.env.GROQ_API_KEY,
-  };
+  try {
+    return {
+      appVersion: app.getVersion(),
+      nodeVersion: process.version,
+      platform: process.platform,
+      hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+      hasGroqKey: !!process.env.GROQ_API_KEY,
+    };
+  } catch (error) {
+    console.error('Failed to get config:', error);
+    return {
+      error: 'Failed to retrieve configuration',
+      appVersion: 'unknown',
+      nodeVersion: process.version,
+      platform: process.platform,
+      hasElevenLabsKey: false,
+      hasGroqKey: false,
+    };
+  }
 });
 
 // ログ出力: 環境変数の確認（開発環境のみ）
