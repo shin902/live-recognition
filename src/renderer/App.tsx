@@ -12,14 +12,21 @@ interface ConfigInfo {
 export default function App(): JSX.Element {
   const [config, setConfig] = useState<ConfigInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadConfig = async (): Promise<void> => {
       try {
+        if (!window.electronAPI) {
+          throw new Error('Electron API is not available');
+        }
         const configData = await window.electronAPI.getConfig();
         setConfig(configData);
-      } catch (error) {
-        console.error('設定読み込みエラー:', error);
+        setError(null);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : '設定の読み込みに失敗しました';
+        console.error('設定読み込みエラー:', errorMessage);
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -30,6 +37,17 @@ export default function App(): JSX.Element {
 
   if (loading) {
     return <div className="container loading">読み込み中...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="container">
+        <div className="card">
+          <h1>エラーが発生しました</h1>
+          <p className="error-message">{error}</p>
+        </div>
+      </div>
+    );
   }
 
   return (

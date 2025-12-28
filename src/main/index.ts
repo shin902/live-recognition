@@ -1,7 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import dotenv from 'dotenv';
-
-const path = require('path');
+import path from 'path';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -33,7 +32,12 @@ const createWindow = (): void => {
   });
 };
 
-app.on('ready', createWindow);
+app
+  .whenReady()
+  .then(createWindow)
+  .catch((error: Error) => {
+    console.error('Failed to create window:', error);
+  });
 
 app.on('window-all-closed', () => {
   // macOSでは、ユーザーが明示的に終了するまでアプリケーションをアクティブに保つ
@@ -60,7 +64,9 @@ ipcMain.handle('get-config', async () => {
   };
 });
 
-// ログ出力: 環境変数の確認
-console.info('Environment variables loaded:');
-console.info(`- ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? '設定済み' : '未設定'}`);
-console.info(`- GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '設定済み' : '未設定'}`);
+// ログ出力: 環境変数の確認（開発環境のみ）
+if (process.env.NODE_ENV === 'development') {
+  console.info('Environment variables loaded:');
+  console.info(`- ELEVENLABS_API_KEY: ${process.env.ELEVENLABS_API_KEY ? '設定済み' : '未設定'}`);
+  console.info(`- GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '設定済み' : '未設定'}`);
+}
