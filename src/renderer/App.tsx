@@ -38,7 +38,7 @@ export default function App(): JSX.Element {
 
   return (
     <div className="app-root">
-      <div className="floating-bar" role="status">
+      <div className="floating-bar" role="status" aria-live="polite">
         {loading && (
           <div className="state">
             <span className="icon" aria-hidden>
