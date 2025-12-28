@@ -23,7 +23,6 @@ type ConfigResponse = {
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
   deepgramKey: string;
-  groqKey: string;
   error?: string;
 };
 
@@ -44,7 +43,6 @@ const registerGetConfigHandler = (): void => {
         hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
         hasGroqKey: !!process.env.GROQ_API_KEY,
         deepgramKey: process.env.DEEPGRAM_API_KEY || '', // APIキーを直接渡す（セキュリティ上は注意が必要だが、今回はプロトタイプのため）
-        groqKey: process.env.GROQ_API_KEY || '',
       };
     } catch (error) {
       console.error('Failed to get config:', error);
@@ -56,7 +54,6 @@ const registerGetConfigHandler = (): void => {
         hasElevenLabsKey: false,
         hasGroqKey: false,
         deepgramKey: '',
-        groqKey: '',
       };
     }
   });
@@ -65,6 +62,70 @@ const registerGetConfigHandler = (): void => {
 
 // レンダラープロセスの初期化前にIPCハンドラーを登録して競合を防ぐ
 registerGetConfigHandler();
+
+/**
+ * Groq APIでテキストを整形するIPCハンドラー
+ */
+let isGroqHandlerRegistered = false;
+const registerGroqHandler = (): void => {
+  if (isGroqHandlerRegistered) return;
+
+  ipcMain.handle('groq:refine-text', async (_event, text: string): Promise<{ success: boolean; text?: string; error?: string }> => {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return { success: false, error: 'Groq APIキーが設定されていません' };
+    }
+
+    if (!text.trim()) {
+      return { success: true, text };
+    }
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: process.env.GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [
+            {
+              role: 'user',
+              content: text,
+            },
+          ],
+          temperature: 0.3,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({})) as { error?: { message?: string } };
+        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+      }
+
+      const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const refinedText = data.choices?.[0]?.message?.content?.trim();
+
+      if (!refinedText) {
+        throw new Error('整形結果が空です');
+      }
+
+      return { success: true, text: refinedText };
+    } catch (error) {
+      console.error('Groq refine error:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : '整形に失敗しました',
+        text // fallbackとして元のテキストを返す
+      };
+    }
+  });
+  isGroqHandlerRegistered = true;
+};
+
+registerGroqHandler();
 
 /**
  * 文字起こしテキストをコピーし、ウィンドウを閉じて、次のアクティブウィンドウに貼り付けてからアプリを終了
@@ -246,6 +307,10 @@ app.on('before-quit', () => {
   if (isPasteHandlerRegistered) {
     ipcMain.removeHandler('paste-to-active-window');
     isPasteHandlerRegistered = false;
+  }
+  if (isGroqHandlerRegistered) {
+    ipcMain.removeHandler('groq:refine-text');
+    isGroqHandlerRegistered = false;
   }
 });
 

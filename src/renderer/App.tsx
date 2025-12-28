@@ -2,8 +2,8 @@ import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useR
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
-import { useGroq } from './hooks/use-groq';
 import { VoiceStatus } from './components/VoiceStatus';
+import refinePromptTemplate from './prompts/refine-text.txt?raw';
 
 interface ConfigInfo {
   appVersion: string;
@@ -12,7 +12,6 @@ interface ConfigInfo {
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
   deepgramKey: string;
-  groqKey: string;
   error?: string;
 }
 
@@ -104,15 +103,59 @@ export default function App(): JSX.Element {
 
   // 整形済みテキストの状態
   const [refinedText, setRefinedText] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
   const pendingTextRef = useRef('');
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Groq Hook
-  const { refineText, isRefining } = useGroq(config?.groqKey || '');
+  // Groq API経由でテキスト整形（IPC使用）
+  const refineText = useCallback(async (rawText: string): Promise<string> => {
+    if (!rawText.trim()) {
+      return rawText;
+    }
+
+    // 前のリクエストをキャンセル
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    setIsRefining(true);
+    setRefineError(null);
+
+    try {
+      const prompt = refinePromptTemplate.replace('{{text}}', rawText);
+      const result = await window.electronAPI.groqRefineText(prompt);
+
+      if (!result.success) {
+        throw new Error(result.error || '整形に失敗しました');
+      }
+
+      return result.text || rawText;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        return rawText;
+      }
+      const errorMsg = err instanceof Error ? err.message : '整形に失敗しました';
+      setRefineError(errorMsg);
+      console.error('Groq refine error:', err);
+      return rawText;
+    } finally {
+      setIsRefining(false);
+    }
+  }, []);
+
+  // クリーンアップ
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   // 確定テキストを受け取ったら整形キューに追加
   const handleFinalTranscript = useCallback(
     async (text: string) => {
-      console.log('🎯 Final transcript received for refinement:', text);
+      console.info('🎯 Final transcript received for refinement:', text);
       pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + text;
     },
     []
@@ -132,13 +175,13 @@ export default function App(): JSX.Element {
   // onAudioDataコールバックをuseCallbackでメモ化
   const handleAudioData = useCallback(
     (data: Int16Array) => {
-      console.log('🎙️  Audio data received from VAD, length:', data.length);
+      console.info('🎙️  Audio data received from VAD, length:', data.length);
       // Deepgramに接続済みなら送信
       if (isDeepgramConnected) {
-        console.log('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
+        console.info('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
         sendAudio(data);
       } else {
-        console.log('⏸️  Not sending (connected:', isDeepgramConnected, ')');
+        console.warn('⏸️  Not sending (connected:', isDeepgramConnected, ')');
       }
     },
     [isDeepgramConnected, sendAudio]
@@ -150,13 +193,13 @@ export default function App(): JSX.Element {
       // 現在の確定テキストを整形
       const textToRefine = pendingTextRef.current;
       if (!textToRefine.trim()) {
-        console.log('⏭️  No text to refine');
+        console.info('⏭️  No text to refine');
         return;
       }
 
-      console.log('🔄 Refining text:', textToRefine);
+      console.info('🔄 Refining text:', textToRefine);
       const refined = await refineText(textToRefine);
-      console.log('✨ Refined result:', refined);
+      console.info('✨ Refined result:', refined);
 
       setRefinedText((prev) => prev + (prev ? ' ' : '') + refined);
       pendingTextRef.current = ''; // 整形済みなのでクリア
@@ -181,7 +224,7 @@ export default function App(): JSX.Element {
 
   // Toggle処理: VADとDeepgramの接続を同期させる
   const handleToggle = useCallback(async () => {
-    console.log('🔘 Toggle button clicked. Current state - isListening:', isListening);
+    console.info('🔘 Toggle button clicked. Current state - isListening:', isListening);
 
     if (!config?.deepgramKey) {
       console.error('❌ No Deepgram API key found');
@@ -191,15 +234,15 @@ export default function App(): JSX.Element {
 
     if (isListening) {
       // 停止処理：まずVADを停止してから接続を切断
-      console.log('⏹️  Stopping: VAD and Deepgram');
+      console.info('⏹️  Stopping: VAD and Deepgram');
       await toggleListening(); // VAD停止（非同期）
       disconnect(); // Deepgram切断
     } else {
       // 開始処理：まずDeepgramに接続してからVADを開始
-      console.log('▶️  Starting: Deepgram connection and VAD');
+      console.info('▶️  Starting: Deepgram connection and VAD');
       connect(config.deepgramKey); // Deepgram接続（即座にWebSocket接続開始）
       await toggleListening(); // VAD開始（非同期で待機）
-      console.log('✅ VAD started, now listening');
+      console.info('✅ VAD started, now listening');
     }
   }, [isListening, toggleListening, connect, disconnect, config]);
 
@@ -240,7 +283,7 @@ export default function App(): JSX.Element {
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
       if (result.success) {
-        console.log('✅ Pasted transcript to active window');
+        console.info('✅ Pasted transcript to active window');
         setRefinedText(''); // 貼り付け後にクリア
         clearTranscript();
       } else {
@@ -310,6 +353,12 @@ export default function App(): JSX.Element {
               <div className="transcript-container">
                 {refinedText && <span className="transcript-final">{refinedText}</span>}
                 {isRefining && <span className="transcript-interim"> 整形中...</span>}
+                {refineError && (
+                  <span className="transcript-error" title={refineError}>
+                    {' '}
+                    整形エラー
+                  </span>
+                )}
                 {interimTranscript && !isRefining && (
                   <span className="transcript-interim"> {interimTranscript}</span>
                 )}

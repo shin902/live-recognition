@@ -15,7 +15,6 @@ declare global {
         hasElevenLabsKey: boolean;
         hasGroqKey: boolean;
         deepgramKey: string;
-        groqKey: string;
         error?: string;
       }>;
       /**
@@ -25,6 +24,16 @@ declare global {
        */
       pasteToActiveWindow: (text: string) => Promise<{
         success: boolean;
+        error?: string;
+      }>;
+      /**
+       * Groq APIでテキストを整形する
+       * @param text 整形するテキスト
+       * @returns 整形結果
+       */
+      groqRefineText: (text: string) => Promise<{
+        success: boolean;
+        text?: string;
         error?: string;
       }>;
     };
