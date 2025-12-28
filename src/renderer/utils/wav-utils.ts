@@ -36,7 +36,7 @@ export function convertFloat32ToWav(audioData: Float32Array, sampleRate: number)
   // write the PCM samples
   floatTo16BitPCM(view, 44, audioData);
 
-  return new Blob([view], { type: 'audio/wav' });
+  return new Blob([view.buffer], { type: 'audio/wav' });
 }
 
 function writeString(view: DataView, offset: number, string: string): void {
