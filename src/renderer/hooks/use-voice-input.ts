@@ -11,7 +11,12 @@ interface UseVoiceInputProps {
   onError?: (error: string) => void;
 }
 
-export function useVoiceInput({ onSpeechStart, onSpeechEnd, onAudioData, onError }: UseVoiceInputProps = {}) {
+export function useVoiceInput({
+  onSpeechStart,
+  onSpeechEnd,
+  onAudioData,
+  onError,
+}: UseVoiceInputProps = {}) {
   const [status, setStatus] = useState<VoiceInputStatus>('idle');
   const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(true);

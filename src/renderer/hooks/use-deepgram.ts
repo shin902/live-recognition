@@ -33,8 +33,9 @@ export function useDeepgram(): UseDeepgramReturn {
 
     try {
       // nova-2 model, 日本語, スマートフォーマット有効
-      const url = 'wss://api.deepgram.com/v1/listen?model=nova-2&language=ja&smart_format=true&interim_results=true&encoding=linear16&sample_rate=16000';
-      
+      const url =
+        'wss://api.deepgram.com/v1/listen?model=nova-2&language=ja&smart_format=true&interim_results=true&encoding=linear16&sample_rate=16000';
+
       const socket = new WebSocket(url, ['token', apiKey]);
       socketRef.current = socket;
 
@@ -42,7 +43,7 @@ export function useDeepgram(): UseDeepgramReturn {
         console.log('Deepgram WebSocket connected');
         setIsConnected(true);
         setError(null);
-        
+
         // KeepAlive (10秒ごとに送信)
         keepAliveIntervalRef.current = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
@@ -52,23 +53,36 @@ export function useDeepgram(): UseDeepgramReturn {
       };
 
       socket.onmessage = (event) => {
+        console.log('📩 Deepgram message received:', event.data);
         try {
           const data = JSON.parse(event.data);
-          
+          console.log('📊 Parsed data:', data);
+
           // メタデータなどはスキップ
-          if (data.type === 'Metadata') return;
+          if (data.type === 'Metadata') {
+            console.log('⏭️  Skipping metadata');
+            return;
+          }
 
           const result = data.channel?.alternatives?.[0];
+          console.log('🔍 Extracted result:', result);
+          console.log('🎯 is_final:', data.is_final);
+
           if (result && result.transcript) {
+            console.log('📝 Transcript found:', result.transcript);
             if (data.is_final) {
-              setTranscript(prev => prev + (prev ? ' ' : '') + result.transcript);
+              console.log('✅ Final transcript:', result.transcript);
+              setTranscript((prev) => prev + (prev ? ' ' : '') + result.transcript);
               setInterimTranscript(''); // 確定したら暫定テキストはクリア
             } else {
+              console.log('🔄 Interim transcript:', result.transcript);
               setInterimTranscript(result.transcript);
             }
+          } else {
+            console.log('⚠️  No transcript in result');
           }
         } catch (e) {
-          console.error('Deepgram parse error:', e);
+          console.error('❌ Deepgram parse error:', e);
         }
       };
 
@@ -84,7 +98,6 @@ export function useDeepgram(): UseDeepgramReturn {
         console.error('Deepgram WebSocket error:', e);
         setError('Deepgram接続エラーが発生しました');
       };
-
     } catch (err) {
       setError(err instanceof Error ? err.message : '接続に失敗しました');
     }
@@ -105,7 +118,13 @@ export function useDeepgram(): UseDeepgramReturn {
 
   const sendAudio = useCallback((audioData: Int16Array) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
+      console.log('🎤 Sending audio data, length:', audioData.length);
       socketRef.current.send(audioData);
+    } else {
+      console.warn(
+        '⚠️  WebSocket not open, cannot send audio. State:',
+        socketRef.current?.readyState
+      );
     }
   }, []);
 
@@ -123,6 +142,6 @@ export function useDeepgram(): UseDeepgramReturn {
     transcript,
     interimTranscript,
     isConnected,
-    error
+    error,
   };
 }

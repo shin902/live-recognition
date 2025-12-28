@@ -8,11 +8,11 @@ interface VoiceStatusProps {
   loading: boolean;
 }
 
-export const VoiceStatus: React.FC<VoiceStatusProps> = ({ 
-  status, 
-  isListening, 
+export const VoiceStatus: React.FC<VoiceStatusProps> = ({
+  status,
+  isListening,
   onToggle,
-  loading
+  loading,
 }) => {
   const getStatusDisplay = () => {
     switch (status) {
@@ -35,7 +35,7 @@ export const VoiceStatus: React.FC<VoiceStatusProps> = ({
 
   return (
     <div className={`voice-status-container ${display.class}`}>
-      <button 
+      <button
         className={`voice-toggle-button ${isListening ? 'active' : ''}`}
         onClick={onToggle}
         disabled={loading}

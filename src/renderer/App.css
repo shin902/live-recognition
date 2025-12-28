@@ -206,7 +206,16 @@ body {
 }
 
 /* Status variants */
-.listening .status-text { color: #60a5fa; }
-.speech .status-text { color: #4ade80; font-weight: 700; }
-.processing .status-text { color: #fbbf24; }
-.error .status-text { color: #f87171; }
+.listening .status-text {
+  color: #60a5fa;
+}
+.speech .status-text {
+  color: #4ade80;
+  font-weight: 700;
+}
+.processing .status-text {
+  color: #fbbf24;
+}
+.error .status-text {
+  color: #f87171;
+}

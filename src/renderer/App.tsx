@@ -87,7 +87,7 @@ export default function App(): JSX.Element {
       console.warn('Permissions API not fully supported, falling back to getUserMedia check');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach(track => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
         setMicPermission('granted');
       } catch (e) {
         setMicPermission('denied');
@@ -101,44 +101,65 @@ export default function App(): JSX.Element {
   }, [loadConfig, checkMicPermission]);
 
   // Deepgram Hook
-  const { 
-    connect, 
-    disconnect, 
-    sendAudio, 
-    transcript, 
-    interimTranscript, 
+  const {
+    connect,
+    disconnect,
+    sendAudio,
+    transcript,
+    interimTranscript,
     isConnected: isDeepgramConnected,
-    error: deepgramError 
+    error: deepgramError,
   } = useDeepgram();
 
-  // Voice Input Hook
-  const { status, isListening, toggleListening, loading: vadLoading } = useVoiceInput({
-    onAudioData: (data) => {
-      // 録音中かつ接続済みなら送信
-      if (isListening && isDeepgramConnected) {
+  // onAudioDataコールバックをuseCallbackでメモ化
+  const handleAudioData = useCallback(
+    (data: Int16Array) => {
+      console.log('🎙️  Audio data received from VAD, length:', data.length);
+      // Deepgramに接続済みなら送信
+      if (isDeepgramConnected) {
+        console.log('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
         sendAudio(data);
+      } else {
+        console.log('⏸️  Not sending (connected:', isDeepgramConnected, ')');
       }
     },
+    [isDeepgramConnected, sendAudio]
+  );
+
+  // Voice Input Hook
+  const {
+    status,
+    isListening,
+    toggleListening,
+    loading: vadLoading,
+  } = useVoiceInput({
+    onAudioData: handleAudioData,
     onError: (err) => {
       setError(`音声入力エラー: ${err}`);
-    }
+    },
   });
 
   // Toggle処理: VADとDeepgramの接続を同期させる
-  const handleToggle = useCallback(() => {
+  const handleToggle = useCallback(async () => {
+    console.log('🔘 Toggle button clicked. Current state - isListening:', isListening);
+
     if (!config?.deepgramKey) {
+      console.error('❌ No Deepgram API key found');
       setError('Deepgram APIキーが設定されていません');
       return;
     }
 
     if (isListening) {
-      // 停止処理
-      toggleListening(); // VAD停止
-      disconnect();      // Deepgram切断
+      // 停止処理：まずVADを停止してから接続を切断
+      console.log('⏹️  Stopping: VAD and Deepgram');
+      await toggleListening(); // VAD停止（非同期）
+      disconnect(); // Deepgram切断
     } else {
-      // 開始処理
-      connect(config.deepgramKey); // Deepgram接続
-      toggleListening();           // VAD開始
+      // 開始処理：まずDeepgramに接続してからVADを開始
+      console.log('▶️  Starting: Deepgram connection and VAD');
+      connect(config.deepgramKey); // Deepgram接続（即座にWebSocket接続開始）
+      await toggleListening(); // VAD開始（非同期で待機）
+      console.log('✅ VAD started, now listening');
     }
   }, [isListening, toggleListening, connect, disconnect, config]);
 
@@ -180,7 +201,14 @@ export default function App(): JSX.Element {
                 ⚠️
               </span>
               <span>{error.length > 30 ? 'エラーが発生しました' : error}</span>
-              <button type="button" className="retry" onClick={() => { setError(null); loadConfig(); }}>
+              <button
+                type="button"
+                className="retry"
+                onClick={() => {
+                  setError(null);
+                  loadConfig();
+                }}
+              >
                 再試行
               </button>
             </div>
@@ -188,17 +216,19 @@ export default function App(): JSX.Element {
 
           {config && !loading && !error && (
             <div className="status-row">
-              <VoiceStatus 
+              <VoiceStatus
                 status={status}
                 isListening={isListening}
                 onToggle={handleToggle}
                 loading={vadLoading}
               />
-              
+
               {/* テキスト表示エリア */}
               <div className="transcript-container">
                 {transcript && <span className="transcript-final">{transcript}</span>}
-                {interimTranscript && <span className="transcript-interim"> {interimTranscript}</span>}
+                {interimTranscript && (
+                  <span className="transcript-interim"> {interimTranscript}</span>
+                )}
                 {!transcript && !interimTranscript && isListening && (
                   <span className="transcript-placeholder">お話しください...</span>
                 )}

@@ -1,11 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  Menu,
-  MenuItemConstructorOptions,
-  screen,
-} from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions, screen } from 'electron';
 import dotenv from 'dotenv';
 import path from 'path';
 import { computeWindowBounds } from './window-metrics';
@@ -171,8 +164,6 @@ app.on('before-quit', () => {
     isGetConfigHandlerRegistered = false;
   }
 });
-
-
 
 app.on('activate', () => {
   // macOSでアプリケーションアイコンがクリックされた際、ウィンドウを再作成
