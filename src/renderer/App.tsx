@@ -509,12 +509,22 @@ export default function App(): JSX.Element {
       return;
     }
 
+    // 処理中のテキストを保持するために、まだ完了していない部分を記録
+    const pendingInterim = interimTranscript;
+    const hasPendingRefinement = isRefining;
+
     try {
       const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
       if (result.success) {
         console.info('✅ Pasted transcript to active window');
-        setRefinedText(''); // 貼り付け後にクリア
-        clearTranscript();
+        // 貼り付けたテキストの部分のみクリア（interimは保持）
+        setRefinedText('');
+        // 整形中または認識中のテキストがある場合はclearTranscriptを呼ばない
+        if (!pendingInterim && !hasPendingRefinement) {
+          clearTranscript();
+        }
+        // 手動編集フラグをリセットして自動更新を再開
+        setIsManuallyEdited(false);
       } else {
         console.error('❌ Failed to paste:', result.error);
         setError(`貼り付けに失敗しました: ${result.error}`);
@@ -523,7 +533,7 @@ export default function App(): JSX.Element {
       console.error('❌ Paste error:', err);
       setError('貼り付けに失敗しました');
     }
-  }, [refinedText, interimTranscript, clearTranscript]);
+  }, [refinedText, interimTranscript, isRefining, clearTranscript]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
