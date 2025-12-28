@@ -142,6 +142,7 @@ export default function App(): JSX.Element {
   const refiningCountRef = useRef(0); // 並行実行中の整形処理数
   const prevHeightRef = useRef(0); // 前回のtextarea高さ
   const isMountedRef = useRef(true); // コンポーネントのマウント状態
+  const sentenceBufferRef = useRef(''); // 句点待ちのバッファ
 
   // 順序保証のためのキュー管理
   const sequenceIdRef = useRef(0); // 発話のシーケンスID
@@ -295,7 +296,78 @@ export default function App(): JSX.Element {
     }
   }, []);
 
-  // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
+  // 句点で区切って一文ごとに処理する関数
+  const processSentence = useCallback(async (sentence: string) => {
+    // 空のテキストはスキップ
+    if (!sentence.trim()) {
+      return;
+    }
+    
+    // 既に処理済みのテキストはスキップ
+    if (processedTranscriptsRef.current.has(sentence)) {
+      console.info('⏭️  Skipping duplicate sentence:', sentence);
+      return;
+    }
+    
+    const sequenceId = sequenceIdRef.current++;
+    const startTime = Date.now();
+    console.info(`🎯 Processing sentence [seq:${sequenceId}]:`, sentence);
+    processedTranscriptsRef.current.set(sentence, startTime);
+    sequenceTimestampsRef.current.set(sequenceId, startTime);
+    
+    // メモリリーク防止: 古いエントリを削除（サイズベース）
+    if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
+      const entries = Array.from(processedTranscriptsRef.current.entries());
+      const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
+      processedTranscriptsRef.current = new Map(keepEntries);
+    }
+    
+    // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
+    const now = Date.now();
+    for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
+      if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+        sequenceTimestampsRef.current.delete(seqId);
+        completedResultsRef.current.delete(seqId);
+      }
+    }
+    // processedTranscriptsRefも時間ベースでクリーンアップ
+    for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
+      if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+        processedTranscriptsRef.current.delete(txt);
+      }
+    }
+    
+    // 即座に整形開始（非同期で待たない）
+    void (async () => {
+      try {
+        console.info(`🔄 Refining sentence [seq:${sequenceId}]:`, sentence);
+        // refinedTextRefから最新の文脈を取得
+        const currentContext = refinedTextRef.current;
+        const refined = await refineText(sentence, currentContext);
+        // 改行を削除して1行のテキストにする
+        const refinedWithoutNewlines = refined.replace(/\n+/g, '');
+        console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
+
+        if (!isMountedRef.current) return; // アンマウント後は処理しない
+
+        // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
+        completedResultsRef.current.set(sequenceId, refinedWithoutNewlines);
+        
+        // 順序通りに表示
+        displayCompletedResults();
+      } catch (err) {
+        console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
+        
+        if (!isMountedRef.current) return; // アンマウント後は処理しない
+        
+        // エラー時はフォールバックとして元のテキストを使用
+        completedResultsRef.current.set(sequenceId, sentence);
+        displayCompletedResults();
+      }
+    })();
+  }, [refineText, displayCompletedResults]);
+
+  // 確定テキストを受け取ったら句点で区切って処理
   const handleFinalTranscript = useCallback(
     async (text: string) => {
       // 空のテキストはスキップ（VADは反応したが音声認識できなかった場合）
@@ -304,70 +376,28 @@ export default function App(): JSX.Element {
         return;
       }
       
-      // 既に処理済みのテキストはスキップ
-      if (processedTranscriptsRef.current.has(text)) {
-        console.info('⏭️  Skipping duplicate transcript:', text);
-        return;
-      }
+      console.info(`📥 Received transcript:`, text);
       
-      const sequenceId = sequenceIdRef.current++;
-      const startTime = Date.now();
-      console.info(`🎯 Final transcript received [seq:${sequenceId}], starting refinement:`, text);
-      processedTranscriptsRef.current.set(text, startTime);
-      sequenceTimestampsRef.current.set(sequenceId, startTime);
+      // バッファに追加
+      sentenceBufferRef.current += text;
+      console.info(`📝 Buffer content:`, sentenceBufferRef.current);
       
-      // メモリリーク防止: 古いエントリを削除（サイズベース）
-      if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
-        const entries = Array.from(processedTranscriptsRef.current.entries());
-        const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
-        processedTranscriptsRef.current = new Map(keepEntries);
-      }
+      // 句点で分割（。で区切る）
+      const sentences = sentenceBufferRef.current.split('。');
       
-      // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
-      const now = Date.now();
-      for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
-        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
-          sequenceTimestampsRef.current.delete(seqId);
-          completedResultsRef.current.delete(seqId);
+      // 最後の要素は句点がないので、バッファに残す
+      sentenceBufferRef.current = sentences.pop() || '';
+      console.info(`💾 Remaining buffer:`, sentenceBufferRef.current);
+      
+      // 句点で終わる完全な文を処理
+      for (const sentence of sentences) {
+        if (sentence.trim()) {
+          // 句点を付け直して処理
+          await processSentence(sentence.trim() + '。');
         }
       }
-      // processedTranscriptsRefも時間ベースでクリーンアップ
-      for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
-        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
-          processedTranscriptsRef.current.delete(txt);
-        }
-      }
-      
-      // 即座に整形開始（非同期で待たない）
-      void (async () => {
-        try {
-          console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
-          // refinedTextRefから最新の文脈を取得
-          const currentContext = refinedTextRef.current;
-          const refined = await refineText(text, currentContext);
-          // 改行を削除して1行のテキストにする
-          const refinedWithoutNewlines = refined.replace(/\n+/g, '');
-          console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
-
-          if (!isMountedRef.current) return; // アンマウント後は処理しない
-
-          // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
-          completedResultsRef.current.set(sequenceId, refinedWithoutNewlines);
-          
-          // 順序通りに表示
-          displayCompletedResults();
-        } catch (err) {
-          console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
-          
-          if (!isMountedRef.current) return; // アンマウント後は処理しない
-          
-          // エラー時はフォールバックとして元のテキストを使用
-          completedResultsRef.current.set(sequenceId, text);
-          displayCompletedResults();
-        }
-      })();
     },
-    [refineText, displayCompletedResults]
+    [processSentence]
   );
 
   // Deepgram Hook
