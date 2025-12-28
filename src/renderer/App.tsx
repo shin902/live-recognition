@@ -133,6 +133,7 @@ export default function App(): JSX.Element {
   // 整形済みテキストの状態
   const [refinedText, setRefinedText] = useState('');
   const refinedTextRef = useRef(''); // 最新のrefinedTextをrefで保持
+  const [bufferText, setBufferText] = useState(''); // バッファのテキスト（未整形）を表示用に保持
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
   const [isManuallyEdited, setIsManuallyEdited] = useState(false); // ユーザー編集フラグ
@@ -398,6 +399,7 @@ export default function App(): JSX.Element {
       
       // 最後の要素（区切り文字がない部分）はバッファに残す
       sentenceBufferRef.current = parts[parts.length - 1] || '';
+      setBufferText(sentenceBufferRef.current); // バッファの内容を表示用ステートに反映
       console.info(`💾 Remaining buffer:`, sentenceBufferRef.current);
       
       // 区切り文字で終わる完全な文を処理
@@ -566,6 +568,7 @@ export default function App(): JSX.Element {
       console.info('🔄 Flushing buffer:', sentenceBufferRef.current);
       await processSentence(sentenceBufferRef.current.trim());
       sentenceBufferRef.current = ''; // バッファをクリア
+      setBufferText(''); // 表示もクリア
     }
     
     // 整形処理が完了するまで少し待つ
@@ -616,6 +619,7 @@ export default function App(): JSX.Element {
         setRefinedText('');
         refinedTextRef.current = '';
         sentenceBufferRef.current = ''; // バッファもクリア
+        setBufferText(''); // 表示もクリア
         // 整形中または認識中のテキストがある場合はclearTranscriptを呼ばない
         if (!pendingInterim && !hasPendingRefinement) {
           clearTranscript();
@@ -672,6 +676,24 @@ export default function App(): JSX.Element {
                 aria-atomic="false"
                 aria-busy={isRefining}
               />
+              {/* バッファテキストをオーバーレイ表示 */}
+              {bufferText && (
+                <div 
+                  style={{
+                    position: 'absolute',
+                    bottom: '72px',
+                    left: '12px',
+                    right: '12px',
+                    padding: '12px 16px',
+                    color: 'rgba(255, 255, 255, 0.4)',
+                    fontSize: '14px',
+                    pointerEvents: 'none',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  }}
+                >
+                  {bufferText}
+                </div>
+              )}
             </div>
 
             {/* コントロールバー */}
@@ -692,7 +714,10 @@ export default function App(): JSX.Element {
                       整形エラー
                     </span>
                   )}
-                  {interimTranscript && !isRefining && (
+                  {bufferText && !isRefining && (
+                    <span className="transcript-interim">{bufferText}</span>
+                  )}
+                  {interimTranscript && !isRefining && !bufferText && (
                     <span className="transcript-interim">{interimTranscript}</span>
                   )}
                 </div>
