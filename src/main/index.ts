@@ -228,9 +228,10 @@ const registerResizeHandler = (): void => {
 
   ipcMain.handle('resize-window', async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
     try {
-      // 入力値の検証（型・範囲）
+      // 入力値の検証（型・範囲・有限数）
       const MAX_REASONABLE_HEIGHT = 10000; // 10000px以上は異常値
-      if (typeof height !== 'number' || isNaN(height) || height < 0 || height > MAX_REASONABLE_HEIGHT) {
+      if (typeof height !== 'number' || !isFinite(height) || height < 0 || height > MAX_REASONABLE_HEIGHT) {
+        console.warn('Invalid resize attempt:', { height, type: typeof height });
         return { success: false, error: 'Invalid height parameter' };
       }
       

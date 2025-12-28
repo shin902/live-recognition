@@ -133,7 +133,8 @@ export default function App(): JSX.Element {
   const [refinedText, setRefinedText] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
-  const processedTranscriptsRef = useRef(new Set<string>()); // 処理済みテキストを追跡
+  const [isManuallyEdited, setIsManuallyEdited] = useState(false); // ユーザー編集フラグ
+  const processedTranscriptsRef = useRef<Map<string, number>>(new Map()); // 処理済みテキストとタイムスタンプ
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const refiningCountRef = useRef(0); // 並行実行中の整形処理数
@@ -145,6 +146,7 @@ export default function App(): JSX.Element {
   const completedResultsRef = useRef<Map<number, string>>(new Map()); // 完了した整形結果
   const sequenceTimestampsRef = useRef<Map<number, number>>(new Map()); // シーケンス開始時刻
   const nextToDisplayRef = useRef(0); // 次に表示すべきシーケンスID
+  const isDisplayingRef = useRef(false); // 表示処理中フラグ（競合状態防止）
 
   // コンポーネントのアンマウント検出
   useEffect(() => {
@@ -192,59 +194,66 @@ export default function App(): JSX.Element {
   // 完了した整形結果を順序通りに表示（タイムアウト・ギャップ処理付き）
   const displayCompletedResults = useCallback(() => {
     if (!isMountedRef.current) return; // アンマウント後は実行しない
+    if (isManuallyEdited) return; // ユーザー編集中は自動更新を停止
+    if (isDisplayingRef.current) return; // 既に表示処理中の場合はスキップ（競合状態防止）
     
+    isDisplayingRef.current = true;
     const now = Date.now();
     
-    setRefinedText(prev => {
-      const parts: string[] = prev ? [prev] : [];
-      let shouldRetry = false;
-      
-      // 次に表示すべきシーケンスIDから順に処理
-      while (completedResultsRef.current.has(nextToDisplayRef.current)) {
-        const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
-        parts.push(result);
-        completedResultsRef.current.delete(nextToDisplayRef.current);
-        sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
-        console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
-        nextToDisplayRef.current++;
-      }
-      
-      // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
-      const gap = sequenceIdRef.current - nextToDisplayRef.current;
-      if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
-        const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
+    try {
+      setRefinedText(prev => {
+        const parts: string[] = prev ? [prev] : [];
+        let shouldRetry = false;
         
-        if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
-          console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
+        // 次に表示すべきシーケンスIDから順に処理
+        while (completedResultsRef.current.has(nextToDisplayRef.current)) {
+          const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
+          parts.push(result);
+          completedResultsRef.current.delete(nextToDisplayRef.current);
           sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
+          console.info(`📝 Displaying sequence ${nextToDisplayRef.current}: ${result}`);
           nextToDisplayRef.current++;
-          shouldRetry = true;
-        } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
-          console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
-          nextToDisplayRef.current++;
-          shouldRetry = true;
         }
-      }
-      
-      // メモリリーク防止: 古い完了結果をクリーンアップ
-      if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
-        const oldestAllowed = nextToDisplayRef.current - TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP;
-        for (const [seqId] of completedResultsRef.current) {
-          if (seqId < oldestAllowed) {
-            completedResultsRef.current.delete(seqId);
-            sequenceTimestampsRef.current.delete(seqId);
+        
+        // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
+        const gap = sequenceIdRef.current - nextToDisplayRef.current;
+        if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
+          const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
+          
+          if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
+            console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
+            sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
+            nextToDisplayRef.current++;
+            shouldRetry = true;
+          } else if (!oldestTimestamp && gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
+            console.warn(`⚠️  Skipping missing sequence ${nextToDisplayRef.current} (large gap)`);
+            nextToDisplayRef.current++;
+            shouldRetry = true;
           }
         }
-      }
-      
-      // スキップ後に再試行が必要な場合、次のtickで再実行
-      if (shouldRetry && isMountedRef.current) {
-        setTimeout(() => displayCompletedResults(), 0);
-      }
-      
-      return parts.join('\n');
-    });
-  }, []);
+        
+        // メモリリーク防止: 古い完了結果をクリーンアップ
+        if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP * 2) {
+          const oldestAllowed = nextToDisplayRef.current - TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP;
+          for (const [seqId] of completedResultsRef.current) {
+            if (seqId < oldestAllowed) {
+              completedResultsRef.current.delete(seqId);
+              sequenceTimestampsRef.current.delete(seqId);
+            }
+          }
+        }
+        
+        // スキップ後に再試行が必要な場合、次のtickで再実行
+        if (shouldRetry && isMountedRef.current && !isManuallyEdited) {
+          setTimeout(() => displayCompletedResults(), 0);
+        }
+        
+        return parts.join('\n');
+      });
+    } finally {
+      isDisplayingRef.current = false;
+    }
+  }, [isManuallyEdited]);
 
   // 確定テキストを受け取ったら即座に整形開始（非同期・順序保証付き）
   const handleFinalTranscript = useCallback(
@@ -258,13 +267,14 @@ export default function App(): JSX.Element {
       const sequenceId = sequenceIdRef.current++;
       const startTime = Date.now();
       console.info(`🎯 Final transcript received [seq:${sequenceId}], starting refinement:`, text);
-      processedTranscriptsRef.current.add(text);
+      processedTranscriptsRef.current.set(text, startTime);
       sequenceTimestampsRef.current.set(sequenceId, startTime);
       
       // メモリリーク防止: 古いエントリを削除（サイズベース）
       if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
-        const entries = Array.from(processedTranscriptsRef.current);
-        processedTranscriptsRef.current = new Set(entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2)));
+        const entries = Array.from(processedTranscriptsRef.current.entries());
+        const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
+        processedTranscriptsRef.current = new Map(keepEntries);
       }
       
       // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
@@ -273,6 +283,12 @@ export default function App(): JSX.Element {
         if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
           sequenceTimestampsRef.current.delete(seqId);
           completedResultsRef.current.delete(seqId);
+        }
+      }
+      // processedTranscriptsRefも時間ベースでクリーンアップ
+      for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          processedTranscriptsRef.current.delete(txt);
         }
       }
       
@@ -506,13 +522,17 @@ export default function App(): JSX.Element {
                 ref={textareaRef}
                 className="transcript-textarea"
                 value={refinedText}
-                onChange={(e) => setRefinedText(e.target.value)}
+                onChange={(e) => {
+                  setRefinedText(e.target.value);
+                  setIsManuallyEdited(true);
+                }}
                 onScroll={handleScroll}
                 placeholder={isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
                 spellCheck={false}
                 aria-label="文字起こしテキスト"
                 aria-live="polite"
                 aria-atomic="false"
+                aria-busy={isRefining}
               />
             </div>
 
