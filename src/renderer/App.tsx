@@ -367,7 +367,7 @@ export default function App(): JSX.Element {
     })();
   }, [refineText, displayCompletedResults]);
 
-  // 確定テキストを受け取ったら句点で区切って処理
+  // 確定テキストを受け取ったら句点・疑問符・感嘆符で区切って処理
   const handleFinalTranscript = useCallback(
     async (text: string) => {
       // 空のテキストはスキップ（VADは反応したが音声認識できなかった場合）
@@ -382,18 +382,28 @@ export default function App(): JSX.Element {
       sentenceBufferRef.current += text;
       console.info(`📝 Buffer content:`, sentenceBufferRef.current);
       
-      // 句点で分割（。で区切る）
-      const sentences = sentenceBufferRef.current.split('。');
+      // 句点・疑問符・感嘆符で分割（。？！で区切る）
+      // 正規表現で分割し、区切り文字も保持する
+      const parts = sentenceBufferRef.current.split(/([。？！])/);
       
-      // 最後の要素は句点がないので、バッファに残す
-      sentenceBufferRef.current = sentences.pop() || '';
+      // 文と区切り文字を結合
+      const sentences: string[] = [];
+      for (let i = 0; i < parts.length - 1; i += 2) {
+        const sentence = parts[i];
+        const delimiter = parts[i + 1];
+        if (sentence.trim() && delimiter) {
+          sentences.push(sentence.trim() + delimiter);
+        }
+      }
+      
+      // 最後の要素（区切り文字がない部分）はバッファに残す
+      sentenceBufferRef.current = parts[parts.length - 1] || '';
       console.info(`💾 Remaining buffer:`, sentenceBufferRef.current);
       
-      // 句点で終わる完全な文を処理
+      // 区切り文字で終わる完全な文を処理
       for (const sentence of sentences) {
         if (sentence.trim()) {
-          // 句点を付け直して処理
-          await processSentence(sentence.trim() + '。');
+          await processSentence(sentence.trim());
         }
       }
     },
