@@ -549,10 +549,43 @@ export default function App(): JSX.Element {
     setIsUserScrolling(!isAtBottom);
   }, []);
 
+  // バッファをフラッシュしてLLMで最終整形する
+  const flushBufferAndRefine = useCallback(async () => {
+    // バッファに残っているテキストがあれば処理
+    if (sentenceBufferRef.current.trim()) {
+      console.info('🔄 Flushing buffer:', sentenceBufferRef.current);
+      await processSentence(sentenceBufferRef.current.trim());
+      sentenceBufferRef.current = ''; // バッファをクリア
+    }
+    
+    // 整形処理が完了するまで少し待つ
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // 全体を再整形（最終まとめ）
+    const allText = refinedTextRef.current;
+    if (allText.trim()) {
+      console.info('✨ Final refinement of all text');
+      try {
+        const finalRefined = await refineText(allText, '');
+        const finalWithoutNewlines = finalRefined.replace(/\n+/g, '');
+        console.info('📋 Final refined text:', finalWithoutNewlines);
+        
+        // 最終整形結果で置き換え
+        setRefinedText(finalWithoutNewlines);
+        refinedTextRef.current = finalWithoutNewlines;
+      } catch (err) {
+        console.error('❌ Final refinement error:', err);
+      }
+    }
+  }, [processSentence, refineText]);
+
   // Enterキーで整形済みテキストをアクティブウィンドウに貼り付け
   const handlePasteTranscript = useCallback(async () => {
+    // まずバッファをフラッシュして最終整形
+    await flushBufferAndRefine();
+    
     // 整形後テキストを優先、なければ整形中のinterimを使用
-    const textToPaste = refinedText || interimTranscript;
+    const textToPaste = refinedTextRef.current || interimTranscript;
     if (!textToPaste) return;
 
     // テキスト長の検証
@@ -571,6 +604,8 @@ export default function App(): JSX.Element {
         console.info('✅ Pasted transcript to active window');
         // 貼り付けたテキストの部分のみクリア（interimは保持）
         setRefinedText('');
+        refinedTextRef.current = '';
+        sentenceBufferRef.current = ''; // バッファもクリア
         // 整形中または認識中のテキストがある場合はclearTranscriptを呼ばない
         if (!pendingInterim && !hasPendingRefinement) {
           clearTranscript();
@@ -585,7 +620,7 @@ export default function App(): JSX.Element {
       console.error('❌ Paste error:', err);
       setError('貼り付けに失敗しました');
     }
-  }, [refinedText, interimTranscript, isRefining, clearTranscript]);
+  }, [flushBufferAndRefine, interimTranscript, isRefining, clearTranscript]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
