@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useState } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
@@ -181,6 +181,15 @@ export default function App(): JSX.Element {
       disconnect();
     };
   }, [disconnect]);
+
+  // 起動時に自動的に文字起こしモードを開始
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (config?.deepgramKey && !loading && !error && !vadLoading && !autoStartedRef.current) {
+      autoStartedRef.current = true;
+      void handleToggle();
+    }
+  }, [config, loading, error, vadLoading, handleToggle]);
 
   return (
     <ErrorBoundary>
