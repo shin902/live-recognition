@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -7,23 +7,24 @@ dotenv.config();
 
 let mainWindow: BrowserWindow | null = null;
 
-const createWindow = (): void => {
-  // ウィンドウサイズとマージン
-  const windowWidth = 600;
-  const windowHeight = 60;
-  const marginBottom = 20;
+const WINDOW_CONFIG = {
+  WIDTH: 600,
+  HEIGHT: 60,
+  MARGIN_BOTTOM: 20,
+} as const;
 
+const createWindow = (): void => {
   // プライマリディスプレイの情報を取得
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 
   // ウィンドウを画面下部中央に配置
-  const x = Math.round((screenWidth - windowWidth) / 2);
-  const y = screenHeight - windowHeight - marginBottom;
+  const x = Math.round((screenWidth - WINDOW_CONFIG.WIDTH) / 2);
+  const y = screenHeight - WINDOW_CONFIG.HEIGHT - WINDOW_CONFIG.MARGIN_BOTTOM;
 
   mainWindow = new BrowserWindow({
-    width: windowWidth,
-    height: windowHeight,
+    width: WINDOW_CONFIG.WIDTH,
+    height: WINDOW_CONFIG.HEIGHT,
     x,
     y,
     frame: false,
@@ -58,9 +59,15 @@ app
   .whenReady()
   .then(() => {
     // macOSでDockアイコンを非表示化
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' && app.dock) {
       app.dock.hide();
     }
+
+    // フレームレスなので明示的に終了できるショートカットを用意
+    globalShortcut.register('CommandOrControl+Q', () => {
+      app.quit();
+    });
+
     createWindow();
   })
   .catch((error: Error) => {
@@ -77,6 +84,10 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // IPCハンドラーのクリーンアップ
   ipcMain.removeHandler('get-config');
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('activate', () => {
