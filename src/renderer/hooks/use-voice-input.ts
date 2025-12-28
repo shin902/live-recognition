@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { MicVAD, utils } from '@ricky0123/vad-web';
+import { MicVAD } from '@ricky0123/vad-web';
 import { convertFloat32ToWav, float32ToInt16 } from '../utils/wav-utils';
 
 export type VoiceInputStatus = 'idle' | 'listening' | 'speech_detected' | 'processing' | 'error';

@@ -55,7 +55,7 @@ export default function App(): JSX.Element {
   const [config, setConfig] = useState<ConfigInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [micPermission, setMicPermission] = useState<PermissionState | 'unknown'>('unknown');
+  const [_micPermission, setMicPermission] = useState<PermissionState | 'unknown'>('unknown');
 
   const loadConfig = useCallback(async (): Promise<void> => {
     setLoading(true);

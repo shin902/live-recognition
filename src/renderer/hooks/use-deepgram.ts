@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-type DeepgramTranscript = {
+type _DeepgramTranscript = {
   is_final: boolean;
   channel: {
     alternatives: {
