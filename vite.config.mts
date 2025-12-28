@@ -21,6 +21,10 @@ export default defineConfig({
         {
           src: '../../node_modules/onnxruntime-web/dist/*.wasm',
           dest: './'
+        },
+        {
+          src: '../../node_modules/onnxruntime-web/dist/*.mjs',
+          dest: './'
         }
       ]
     })
