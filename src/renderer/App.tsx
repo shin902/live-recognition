@@ -159,7 +159,7 @@ export default function App(): JSX.Element {
   }, []);
 
   // Groq API経由でテキスト整形（IPC使用）
-  const refineText = useCallback(async (rawText: string): Promise<string> => {
+  const refineText = useCallback(async (rawText: string, context: string = ''): Promise<string> => {
     if (!rawText.trim()) {
       return rawText;
     }
@@ -171,7 +171,11 @@ export default function App(): JSX.Element {
     }
 
     try {
-      const prompt = refinePromptTemplate.replace('{{text}}', rawText);
+      // コンテキストがある場合はプロンプトに追加
+      const contextSection = context ? `## 前の文脈\n${context}\n\n` : '';
+      const prompt = refinePromptTemplate
+        .replace('{{context}}', contextSection)
+        .replace('{{text}}', rawText);
       const result = await window.electronAPI.groqRefineText(prompt);
 
       if (!result.success) {
@@ -335,7 +339,9 @@ export default function App(): JSX.Element {
       void (async () => {
         try {
           console.info(`🔄 Refining text [seq:${sequenceId}]:`, text);
-          const refined = await refineText(text);
+          // 現在のrefinedTextをコンテキストとして渡す
+          const currentContext = refinedText;
+          const refined = await refineText(text, currentContext);
           // 改行を削除して1行のテキストにする
           const refinedWithoutNewlines = refined.replace(/\n+/g, '');
           console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
