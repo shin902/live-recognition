@@ -17,6 +17,15 @@ declare global {
         deepgramKey: string;
         error?: string;
       }>;
+      /**
+       * テキストをアクティブウィンドウに貼り付ける
+       * @param text 貼り付けるテキスト
+       * @returns 結果オブジェクト
+       */
+      pasteToActiveWindow: (text: string) => Promise<{
+        success: boolean;
+        error?: string;
+      }>;
     };
   }
 }

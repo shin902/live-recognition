@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, Menu, MenuItemConstructorOptions, screen } from 'electron';
+import { app, BrowserWindow, clipboard, ipcMain, Menu, MenuItemConstructorOptions, screen } from 'electron';
 import dotenv from 'dotenv';
 import path from 'path';
+import { exec } from 'child_process';
 import { computeWindowBounds } from './window-metrics';
 
 // 環境変数の読み込み
@@ -61,6 +62,48 @@ const registerGetConfigHandler = (): void => {
 
 // レンダラープロセスの初期化前にIPCハンドラーを登録して競合を防ぐ
 registerGetConfigHandler();
+
+/**
+ * 文字起こしテキストをアクティブウィンドウに貼り付ける
+ * クリップボードにコピーしてからCmd+V (macOS) / Ctrl+V (Windows/Linux) をシミュレート
+ */
+let isPasteHandlerRegistered = false;
+const registerPasteHandler = (): void => {
+  if (isPasteHandlerRegistered) return;
+
+  ipcMain.handle('paste-to-active-window', async (_event, text: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // クリップボードにテキストをコピー
+      clipboard.writeText(text);
+
+      // macOSの場合、AppleScriptを使ってCmd+Vをシミュレート
+      if (process.platform === 'darwin') {
+        return new Promise((resolve) => {
+          exec(
+            `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
+            (error) => {
+              if (error) {
+                console.error('Paste simulation error:', error);
+                resolve({ success: false, error: error.message });
+              } else {
+                resolve({ success: true });
+              }
+            }
+          );
+        });
+      }
+      
+      // Windows/Linuxの場合（未実装）
+      return { success: false, error: 'このプラットフォームではサポートされていません' };
+    } catch (error) {
+      console.error('Paste handler error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  });
+  isPasteHandlerRegistered = true;
+};
+
+registerPasteHandler();
 
 /**
  * フローティングウィンドウを生成し、画面下部中央に配置する
@@ -185,6 +228,10 @@ app.on('before-quit', () => {
   if (isGetConfigHandlerRegistered) {
     ipcMain.removeHandler('get-config');
     isGetConfigHandlerRegistered = false;
+  }
+  if (isPasteHandlerRegistered) {
+    ipcMain.removeHandler('paste-to-active-window');
+    isPasteHandlerRegistered = false;
   }
 });
 

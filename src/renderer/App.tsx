@@ -191,6 +191,39 @@ export default function App(): JSX.Element {
     }
   }, [config, loading, error, vadLoading, handleToggle]);
 
+  // Enterキーで文字起こし内容をアクティブウィンドウに貼り付け
+  const handlePasteTranscript = useCallback(async () => {
+    const textToPaste = transcript || interimTranscript;
+    if (!textToPaste) return;
+
+    try {
+      const result = await window.electronAPI.pasteToActiveWindow(textToPaste);
+      if (result.success) {
+        // 貼り付け成功後、トランスクリプトをクリア
+        // Note: useDeepgramのsetTranscriptが外部から呼べないため、ここでは何もしない
+        console.log('✅ Pasted transcript to active window');
+      } else {
+        console.error('❌ Failed to paste:', result.error);
+        setError(`貼り付けに失敗しました: ${result.error}`);
+      }
+    } catch (err) {
+      console.error('❌ Paste error:', err);
+      setError('貼り付けに失敗しました');
+    }
+  }, [transcript, interimTranscript]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && !event.repeat) {
+        event.preventDefault();
+        void handlePasteTranscript();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handlePasteTranscript]);
+
   return (
     <ErrorBoundary>
       <div className="app-root">
