@@ -7,7 +7,7 @@
   "license": "MIT",
   "packageManager": "pnpm@9.0.0",
   "scripts": {
-    "dev": "concurrently \"pnpm run build:main --watch\" \"pnpm run build:renderer\" \"wait-on dist/main/index.js && electron .\"",
+    "dev": "concurrently \"pnpm run build:main --watch\" \"pnpm run build:renderer\" \"wait-on dist/main/index.js dist/renderer/index.html && electron .\"",
     "build": "pnpm run build:main && pnpm run build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
