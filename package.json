@@ -5,6 +5,7 @@
   "main": "dist/main/index.js",
   "author": "",
   "license": "MIT",
+  "packageManager": "pnpm@9.0.0",
   "scripts": {
     "dev": "concurrently \"pnpm run build:main --watch\" \"pnpm run build:renderer\" \"wait-on dist/main/index.js && electron .\"",
     "build": "pnpm run build:main && pnpm run build:renderer",
@@ -13,7 +14,9 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
@@ -35,6 +38,7 @@
     "prettier": "^3.1.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
+    "vitest": "^4.0.16",
     "wait-on": "^7.0.1"
   }
 }

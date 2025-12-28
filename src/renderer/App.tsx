@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useState } from 'react';
 import './App.css';
 
 interface ConfigInfo {
@@ -7,6 +7,44 @@ interface ConfigInfo {
   platform: string;
   hasElevenLabsKey: boolean;
   hasGroqKey: boolean;
+  error?: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  message?: string;
+}
+
+class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: undefined };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, message: error.message };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error('レンダリング中にエラーが発生しました:', error, info);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="app-root">
+          <div className="floating-bar state error" role="alert">
+            <span className="icon" aria-hidden>
+              ⚠️
+            </span>
+            <span>予期しないエラーが発生しました</span>
+            {this.state.message && <span className="meta">{this.state.message}</span>}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App(): JSX.Element {
@@ -14,86 +52,76 @@ export default function App(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadConfig = async (): Promise<void> => {
-      try {
-        if (!window.electronAPI) {
-          throw new Error('Electron API is not available');
-        }
-        const configData = await window.electronAPI.getConfig();
-        setConfig(configData);
-        setError(null);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : '設定の読み込みに失敗しました';
-        console.error('設定読み込みエラー:', errorMessage);
-        setError(errorMessage);
-      } finally {
-        setLoading(false);
+  const loadConfig = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    try {
+      if (!window.electronAPI?.getConfig) {
+        throw new Error('Electron API is not available');
       }
-    };
-
-    loadConfig();
+      const configData = await window.electronAPI.getConfig();
+      if (configData.error) {
+        throw new Error(configData.error);
+      }
+      setConfig(configData);
+      setError(null);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '設定の読み込みに失敗しました';
+      console.error('設定読み込みエラー:', errorMessage);
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  if (loading) {
-    return <div className="container loading">読み込み中...</div>;
-  }
-
-  if (error) {
-    return (
-      <div className="container">
-        <div className="card">
-          <h1>エラーが発生しました</h1>
-          <p className="error-message">{error}</p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    void loadConfig();
+  }, [loadConfig]);
 
   return (
-    <div className="container">
-      <div className="card">
-        <h1>Live Recognition</h1>
-        <p className="subtitle">リアルタイム音声認識とLLM文章整形</p>
-
-        {config && (
-          <div className="info">
-            <div className="info-section">
-              <h2>アプリケーション情報</h2>
-              <dl>
-                <dt>バージョン</dt>
-                <dd>{config.appVersion}</dd>
-                <dt>Node.js</dt>
-                <dd>{config.nodeVersion}</dd>
-                <dt>プラットフォーム</dt>
-                <dd>{config.platform}</dd>
-              </dl>
+    <ErrorBoundary>
+      <div className="app-root">
+        <div className="floating-bar" role="status" aria-live="polite">
+          {loading && (
+            <div className="state">
+              <span className="icon" aria-hidden>
+                ⏳
+              </span>
+              <span>設定を読み込み中...</span>
             </div>
+          )}
 
-            <div className="info-section">
-              <h2>API キー設定</h2>
-              <div className="status">
-                <div className={`status-item ${config.hasElevenLabsKey ? 'ok' : 'ng'}`}>
-                  <span className="status-indicator"></span>
-                  <span>
-                    ElevenLabs API キー: {config.hasElevenLabsKey ? '✓ 設定済み' : '✗ 未設定'}
-                  </span>
-                </div>
-                <div className={`status-item ${config.hasGroqKey ? 'ok' : 'ng'}`}>
-                  <span className="status-indicator"></span>
-                  <span>Groq API キー: {config.hasGroqKey ? '✓ 設定済み' : '✗ 未設定'}</span>
-                </div>
-              </div>
+          {error && (
+            <div className="state error" title={error}>
+              <span className="icon" aria-hidden>
+                ⚠️
+              </span>
+              <span>設定の取得に失敗しました</span>
+              <button type="button" className="retry" onClick={() => loadConfig()}>
+                再試行
+              </button>
             </div>
+          )}
 
-            <div className="info-section">
-              <p className="note">
-                本セットアップでは、APIキーはまだ使用されていません。次段階で音声認識機能とLLM統合機能が追加されます。
-              </p>
+          {config && !loading && !error && (
+            <div className="state status-row">
+              <span className="brand" title={`v${config.appVersion}`}>
+                🎤 Live Recognition
+              </span>
+              <span className="pill ok">常時前面</span>
+              <span
+                className={`pill ${config.hasElevenLabsKey ? 'ok' : 'ng'}`}
+                title="ElevenLabs API Key"
+              >
+                {config.hasElevenLabsKey ? 'ElevenLabs OK' : 'ElevenLabs 未設定'}
+              </span>
+              <span className={`pill ${config.hasGroqKey ? 'ok' : 'ng'}`} title="Groq API Key">
+                {config.hasGroqKey ? 'Groq OK' : 'Groq 未設定'}
+              </span>
+              <span className="meta">{`${config.platform} · Node ${config.nodeVersion}`}</span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </ErrorBoundary>
   );
 }

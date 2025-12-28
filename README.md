@@ -12,8 +12,8 @@
 ## 必要な環境
 
 - **OS**: macOS
-- **Node.js**: 20.11.0以上（miseで管理）
-- **pnpm**: 9.0.0以上（miseで管理）
+- **Node.js**: pnpmがサポートするバージョン（推奨: 20系以上）
+- **pnpm**: 9.0.0以上（miseまたはcorepackで管理）
 
 ## セットアップ手順
 
@@ -37,6 +37,8 @@ cp .env.example .env
 ```
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 GROQ_API_KEY=your_groq_api_key
+# 開発時のみ: ElectronのDevToolsを開く場合はtrueに設定
+ELECTRON_OPEN_DEVTOOLS=true
 ```
 
 APIキーの取得方法：
