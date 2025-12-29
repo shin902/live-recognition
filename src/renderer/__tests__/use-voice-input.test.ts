@@ -109,23 +109,24 @@ describe('useVoiceInput', () => {
 
   it('handles conversion errors on speech end', async () => {
     const onError = vi.fn();
-    const convertSpy = vi
-      .spyOn(wavUtils, 'convertFloat32ToWav')
-      .mockImplementation(() => {
-        throw new Error('conversion failed');
-      });
+    const convertSpy = vi.spyOn(wavUtils, 'convertFloat32ToWav');
+    convertSpy.mockImplementation(() => {
+      throw new Error('conversion failed');
+    });
 
     const { result } = renderHook(() => useVoiceInput({ onError }));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    act(() => {
-      latestOptions?.onSpeechEnd?.(new Float32Array([0.1]));
-    });
+    try {
+      act(() => {
+        latestOptions?.onSpeechEnd?.(new Float32Array([0.1]));
+      });
 
-    await waitFor(() => expect(result.current.status).toBe('error'));
-    expect(onError).toHaveBeenCalledWith('音声変換に失敗しました');
-
-    convertSpy.mockRestore();
+      await waitFor(() => expect(result.current.status).toBe('error'));
+      expect(onError).toHaveBeenCalledWith('音声変換に失敗しました');
+    } finally {
+      convertSpy.mockRestore();
+    }
   });
 });

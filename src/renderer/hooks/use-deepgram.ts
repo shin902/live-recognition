@@ -28,7 +28,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const keepAliveIntervalRef = useRef<{ socket: WebSocket; id: NodeJS.Timeout } | null>(null);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
 
   // コールバックをrefで保持
@@ -37,6 +37,11 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   }, [onFinalTranscript]);
 
   const connect = useCallback((apiKey: string) => {
+    if (!apiKey || apiKey.trim().length === 0) {
+      setError('APIキーが無効です');
+      return;
+    }
+
     if (
       socketRef.current?.readyState === WebSocket.OPEN ||
       socketRef.current?.readyState === WebSocket.CONNECTING
@@ -67,11 +72,12 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
         setError(null);
 
         // KeepAlive (10秒ごとに送信)
-        keepAliveIntervalRef.current = setInterval(() => {
+        const id = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'KeepAlive' }));
           }
         }, KEEPALIVE_INTERVAL_MS);
+        keepAliveIntervalRef.current = { socket, id };
       };
 
       socket.onmessage = (event) => {
@@ -116,8 +122,8 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
           setIsConnected(false);
           socketRef.current = null;
         }
-        if (keepAliveIntervalRef.current) {
-          clearInterval(keepAliveIntervalRef.current);
+        if (keepAliveIntervalRef.current?.socket === socket) {
+          clearInterval(keepAliveIntervalRef.current.id);
           keepAliveIntervalRef.current = null;
         }
       };
@@ -125,8 +131,8 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       socket.onerror = (e) => {
         console.error('Deepgram WebSocket error:', e);
         setError('Deepgram接続エラーが発生しました');
-        if (keepAliveIntervalRef.current) {
-          clearInterval(keepAliveIntervalRef.current);
+        if (keepAliveIntervalRef.current?.socket === socket) {
+          clearInterval(keepAliveIntervalRef.current.id);
           keepAliveIntervalRef.current = null;
         }
         if (socketRef.current === socket) {
@@ -148,13 +154,17 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       socketRef.current.close();
       socketRef.current = null;
     }
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current.id);
+      keepAliveIntervalRef.current = null;
+    }
     setIsConnected(false);
     setInterimTranscript('');
   }, []);
 
   const sendAudio = useCallback((audioData: Int16Array) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      console.log('🎤 Sending audio data, length:', audioData.length, 'bytes:', audioData.buffer.byteLength);
+      debugLog('🎤 Sending audio data, length:', audioData.length, 'bytes:', audioData.buffer.byteLength);
       // ArrayBufferとして送信（Deepgramはバイナリデータを期待）
       socketRef.current.send(audioData.buffer);
     } else {
