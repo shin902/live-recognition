@@ -5,7 +5,9 @@
 ## 主な機能
 
 - **リアルタイム音声入力**: マイクから音声を取得し、VAD（Voice Activity Detection）で発話区間を検出
-- **音声認識**: Deepgram Nova-2 APIで日本語音声をリアルタイムにテキスト化
+- **音声認識**: 以下のプロバイダーから選択可能
+  - Deepgram Nova-2 API（デフォルト）
+  - ElevenLabs Scribe v2 Realtime API
 - **文章整形**: Groq API（GPT-OSS-120B相当）でテキストを整形・校正
   - フィラー（えー、あのー等）の削除
   - 適切な句読点の挿入
@@ -51,8 +53,14 @@ cp .env.example .env
 その後、`.env`ファイルをテキストエディタで開き、APIキーを設定します：
 
 ```
+# 音声認識プロバイダー (deepgram または elevenlabs、デフォルト: deepgram)
+SPEECH_PROVIDER=deepgram
+
 # Deepgram API キー（音声認識用）
 DEEPGRAM_API_KEY=your_deepgram_api_key
+
+# ElevenLabs API キー（音声認識用）
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
 
 # Groq API キー（テキスト整形用）
 GROQ_API_KEY=your_groq_api_key
@@ -65,11 +73,19 @@ GROQ_API_KEY=your_groq_api_key
 ```
 
 APIキーの取得方法：
+
 - **Deepgram**: https://console.deepgram.com/ (無料枠: 月200時間)
+- **ElevenLabs**: https://elevenlabs.io/ (Scribe v2 Realtime)
 - **Groq**: https://console.groq.com/ (無料枠: 月1000万トークン)
 
-⚠️ **セキュリティ注意**: 
-- Deepgram APIキーはレンダラープロセスに直接渡されています（プロトタイプ段階）
+**音声認識プロバイダーの選択**:
+
+- `SPEECH_PROVIDER=deepgram`: Deepgram Nova-2を使用（デフォルト）
+- `SPEECH_PROVIDER=elevenlabs`: ElevenLabs Scribe v2 Realtimeを使用
+
+⚠️ **セキュリティ注意**:
+
+- 音声認識APIキー（Deepgram/ElevenLabs）はレンダラープロセスに直接渡されています（プロトタイプ段階）
 - Groq APIキーはメインプロセスで安全に管理されています
 - 本番環境では全てのAPIキーをメインプロセスで管理することを推奨します
 
@@ -167,6 +183,7 @@ live-recognition/
 詳細は `openspec/project.md` を参照してください。
 
 ### コードスタイル
+
 - **TypeScript strict mode** 有効化
 - **ESLint + Prettier** で自動フォーマット
 - **命名規則**:
@@ -176,6 +193,7 @@ live-recognition/
   - ファイル名: kebab-case (`voice-recognition-service.ts`)
 
 ### テスト
+
 - **Unit Tests**: ビジネスロジック、ユーティリティ関数（Vitest）
 - **Integration Tests**: IPC通信、API統合
 
@@ -185,6 +203,7 @@ pnpm test:watch    # ウォッチモード
 ```
 
 **テストフレームワークについて**:
+
 - Vitest 2.1.4を使用しています
 - React 18とViteとの互換性のため、安定版の2.xシリーズを採用
 - 将来的にはVitest 4.x以降への更新を検討予定
@@ -195,6 +214,7 @@ pnpm test:watch    # ウォッチモード
 ### 開発サーバーが起動しない
 
 1. miseのツールがインストールされているか確認：
+
    ```bash
    mise install
    ```
@@ -213,6 +233,7 @@ pnpm test:watch    # ウォッチモード
 ### Electronが起動しない
 
 1. TypeScript型チェック：
+
    ```bash
    pnpm type-check
    ```

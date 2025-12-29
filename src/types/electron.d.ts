@@ -12,9 +12,10 @@ declare global {
         appVersion: string;
         nodeVersion: string;
         platform: string;
-        hasElevenLabsKey: boolean;
-        hasGroqKey: boolean;
+        speechProvider: 'deepgram' | 'elevenlabs';
         deepgramKey: string;
+        elevenLabsKey: string;
+        hasGroqKey: boolean;
         error?: string;
       }>;
       /**

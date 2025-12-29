@@ -38,9 +38,10 @@ type ConfigResponse = {
   appVersion: string;
   nodeVersion: string;
   platform: string;
-  hasElevenLabsKey: boolean;
-  hasGroqKey: boolean;
+  speechProvider: 'deepgram' | 'elevenlabs';
   deepgramKey: string;
+  elevenLabsKey: string;
+  hasGroqKey: boolean;
   error?: string;
 };
 
@@ -54,13 +55,19 @@ const registerGetConfigHandler = (): void => {
 
   ipcMain.handle('get-config', async (): Promise<ConfigResponse> => {
     try {
+      // 環境変数からプロバイダーを取得（デフォルト: deepgram）
+      const speechProvider = (
+        process.env.SPEECH_PROVIDER?.toLowerCase() === 'elevenlabs' ? 'elevenlabs' : 'deepgram'
+      ) as 'deepgram' | 'elevenlabs';
+
       return {
         appVersion: app.getVersion(),
         nodeVersion: process.version,
         platform: process.platform,
-        hasElevenLabsKey: !!process.env.ELEVENLABS_API_KEY,
+        speechProvider,
+        deepgramKey: process.env.DEEPGRAM_API_KEY || '',
+        elevenLabsKey: process.env.ELEVENLABS_API_KEY || '',
         hasGroqKey: !!process.env.GROQ_API_KEY,
-        deepgramKey: process.env.DEEPGRAM_API_KEY || '', // APIキーを直接渡す（セキュリティ上は注意が必要だが、今回はプロトタイプのため）
       };
     } catch (error) {
       console.error('Failed to get config:', error);
@@ -69,9 +76,10 @@ const registerGetConfigHandler = (): void => {
         appVersion: 'unknown',
         nodeVersion: process.version,
         platform: process.platform,
-        hasElevenLabsKey: false,
-        hasGroqKey: false,
+        speechProvider: 'deepgram',
         deepgramKey: '',
+        elevenLabsKey: '',
+        hasGroqKey: false,
       };
     }
   });
