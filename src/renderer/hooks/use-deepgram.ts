@@ -16,11 +16,34 @@ type UseDeepgramReturn = {
 };
 
 export const KEEPALIVE_INTERVAL_MS = 10000;
+export const MIN_API_KEY_LENGTH = 20;
 const isDebug = process.env.NODE_ENV !== 'production';
 const debugLog = (...args: unknown[]) => {
   if (isDebug) console.log(...args);
 };
 
+/**
+ * React hook for managing Deepgram WebSocket connection
+ * Handles real-time speech transcription via Deepgram's streaming API
+ * 
+ * @param options - Configuration options
+ * @param options.onFinalTranscript - Callback invoked when a final transcript is received
+ * @returns Connection state and control functions
+ * 
+ * @example
+ * const { connect, disconnect, sendAudio, transcript, isConnected } = useDeepgram({
+ *   onFinalTranscript: (text) => console.log('Final:', text)
+ * });
+ * 
+ * // Connect with API key
+ * connect('your-deepgram-api-key');
+ * 
+ * // Send audio data
+ * sendAudio(int16AudioData);
+ * 
+ * // Disconnect when done
+ * disconnect();
+ */
 export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn {
   const { onFinalTranscript } = options;
   const [isConnected, setIsConnected] = useState(false);
@@ -30,6 +53,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   const socketRef = useRef<WebSocket | null>(null);
   const keepAliveIntervalRef = useRef<{ socket: WebSocket; id: NodeJS.Timeout } | null>(null);
   const onFinalTranscriptRef = useRef(onFinalTranscript);
+  const hasErrorOccurred = useRef(false);
 
   // コールバックをrefで保持
   useEffect(() => {
@@ -42,7 +66,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
       setError('APIキーが無効です');
       return;
     }
-    if (apiKey.trim().length < 20) {
+    if (apiKey.trim().length < MIN_API_KEY_LENGTH) {
       setError('APIキーの形式が正しくありません');
       return;
     }
@@ -70,11 +94,17 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
 
       const socket = new WebSocket(url, ['token', apiKey]);
       socketRef.current = socket;
+      hasErrorOccurred.current = false;
 
       socket.onopen = () => {
         debugLog('Deepgram WebSocket connected');
         setIsConnected(true);
         setError(null);
+
+        // Clear any existing keepalive interval to prevent race conditions
+        if (keepAliveIntervalRef.current) {
+          clearInterval(keepAliveIntervalRef.current.id);
+        }
 
         // KeepAlive (10秒ごとに送信)
         const id = setInterval(() => {
@@ -128,15 +158,17 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
           clearInterval(keepAliveIntervalRef.current.id);
           keepAliveIntervalRef.current = null;
         }
-        // Then reset connection state
-        if (socketRef.current === socket) {
+        // Only update state if not already handled by error handler
+        if (socketRef.current === socket && !hasErrorOccurred.current) {
           setIsConnected(false);
           socketRef.current = null;
         }
+        hasErrorOccurred.current = false;
       };
 
       socket.onerror = (e) => {
         console.error('Deepgram WebSocket error:', e);
+        hasErrorOccurred.current = true;
         setError('Deepgram接続エラーが発生しました');
         // Clear keepalive interval immediately
         if (keepAliveIntervalRef.current?.socket === socket) {
