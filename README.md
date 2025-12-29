@@ -176,8 +176,18 @@ live-recognition/
   - ファイル名: kebab-case (`voice-recognition-service.ts`)
 
 ### テスト
-- **Unit Tests**: ビジネスロジック、ユーティリティ関数（Jest/Vitest）
+- **Unit Tests**: ビジネスロジック、ユーティリティ関数（Vitest）
 - **Integration Tests**: IPC通信、API統合
+
+```bash
+pnpm test          # テスト実行
+pnpm test:watch    # ウォッチモード
+```
+
+**テストフレームワークについて**:
+- Vitest 2.1.4を使用しています
+- React 18とViteとの互換性のため、安定版の2.xシリーズを採用
+- 将来的にはVitest 4.x以降への更新を検討予定
 - **E2E Tests**: 主要フロー（Playwright）
 
 ## トラブルシューティング
