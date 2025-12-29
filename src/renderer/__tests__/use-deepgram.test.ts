@@ -3,8 +3,17 @@ import { renderHook, act } from '@testing-library/react';
 import { useDeepgram, KEEPALIVE_INTERVAL_MS, MIN_API_KEY_LENGTH } from '../hooks/use-deepgram';
 
 /**
- * Mock WebSocket implementation for testing
- * Provides controlled WebSocket behavior with manual event triggering
+ * Test suite for useDeepgram hook
+ * 
+ * Coverage:
+ * - Connection lifecycle (connect, disconnect, reconnect)
+ * - WebSocket state management and cleanup
+ * - Keepalive interval management and memory leak prevention
+ * - API key validation
+ * - Transcript handling (interim and final)
+ * - Error scenarios and recovery
+ * - Race conditions (rapid connect/disconnect, duplicate connections)
+ * - Audio data transmission
  */
 class MockWebSocket {
   static CONNECTING = 0;
@@ -378,5 +387,81 @@ describe('useDeepgram', () => {
     const firstSocketCallCount = firstSocket.send.mock.calls.length;
     vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
     expect(firstSocket.send.mock.calls.length).toBe(firstSocketCallCount);
+  });
+
+  it('handles many rapid sequential final transcripts', () => {
+    const onFinalTranscript = vi.fn();
+    const { result } = renderHook(() => useDeepgram({ onFinalTranscript }));
+
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const socket = MockWebSocket.instances[0];
+    act(() => {
+      socket.triggerOpen();
+    });
+
+    // Send 15 rapid final transcripts
+    act(() => {
+      for (let i = 1; i <= 15; i++) {
+        socket.triggerMessage(
+          JSON.stringify({
+            channel: { alternatives: [{ transcript: `文${i}` }] },
+            is_final: true,
+          })
+        );
+      }
+    });
+
+    // Verify all transcripts were aggregated correctly
+    expect(result.current.transcript).toBe(
+      '文1 文2 文3 文4 文5 文6 文7 文8 文9 文10 文11 文12 文13 文14 文15'
+    );
+    expect(onFinalTranscript).toHaveBeenCalledTimes(15);
+    expect(onFinalTranscript).toHaveBeenLastCalledWith('文15');
+  });
+
+  it('allows reconnection after error', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    // First connection
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    act(() => {
+      firstSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+    expect(result.current.error).toBeNull();
+
+    // Trigger error
+    act(() => {
+      firstSocket.triggerError(new Event('error'));
+    });
+
+    expect(result.current.isConnected).toBe(false);
+    expect(result.current.error).toBe('Deepgram接続エラーが発生しました');
+
+    // Reconnect should work after error
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const secondSocket = MockWebSocket.instances[1];
+    act(() => {
+      secondSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(MockWebSocket.instances.length).toBe(2);
+
+    // Verify keepalive works on reconnected socket
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(secondSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
   });
 });
