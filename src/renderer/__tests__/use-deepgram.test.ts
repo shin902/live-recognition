@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useDeepgram, KEEPALIVE_INTERVAL_MS } from '../hooks/use-deepgram';
+import { useDeepgram, KEEPALIVE_INTERVAL_MS, MIN_API_KEY_LENGTH } from '../hooks/use-deepgram';
 
 /**
  * Mock WebSocket implementation for testing
@@ -274,6 +274,12 @@ describe('useDeepgram', () => {
       result.current.connect('short');
     });
     expect(result.current.error).toBe('APIキーの形式が正しくありません');
+
+    // Test exact minimum length boundary
+    act(() => {
+      result.current.connect('a'.repeat(MIN_API_KEY_LENGTH - 1));
+    });
+    expect(result.current.error).toBe('APIキーの形式が正しくありません');
   });
 
   it('prevents duplicate connections while CONNECTING', () => {
@@ -330,5 +336,47 @@ describe('useDeepgram', () => {
 
     expect(result.current.isConnected).toBe(true);
     expect(MockWebSocket.instances.length).toBe(2);
+  });
+
+  it('handles rapid connect/disconnect cycles', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    // Rapid connect/disconnect/connect
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    act(() => {
+      firstSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+
+    act(() => {
+      result.current.disconnect();
+    });
+
+    expect(result.current.isConnected).toBe(false);
+
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const secondSocket = MockWebSocket.instances[1];
+    act(() => {
+      secondSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+
+    // Verify keepalive is working for second connection
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(secondSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'KeepAlive' }));
+
+    // Verify first socket's keepalive is not still running
+    const firstSocketCallCount = firstSocket.send.mock.calls.length;
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    expect(firstSocket.send.mock.calls.length).toBe(firstSocketCallCount);
   });
 });
