@@ -53,8 +53,8 @@ cp .env.example .env
 その後、`.env`ファイルをテキストエディタで開き、APIキーを設定します：
 
 ```
-# 音声認識プロバイダー (deepgram または elevenlabs、デフォルト: deepgram)
-SPEECH_PROVIDER=deepgram
+# 音声認識プロバイダー (deepgram または elevenlabs、デフォルト: elevenlabs)
+SPEECH_PROVIDER=elevenlabs
 
 # Deepgram API キー（音声認識用）
 DEEPGRAM_API_KEY=your_deepgram_api_key
@@ -80,8 +80,12 @@ APIキーの取得方法：
 
 **音声認識プロバイダーの選択**:
 
-- `SPEECH_PROVIDER=deepgram`: Deepgram Nova-2を使用（デフォルト）
-- `SPEECH_PROVIDER=elevenlabs`: ElevenLabs Scribe v2 Realtimeを使用
+- `SPEECH_PROVIDER=deepgram`: Deepgram Nova-2を使用
+  - バイナリデータを直接送信（低オーバーヘッド）
+  - 月200時間の無料枠
+- `SPEECH_PROVIDER=elevenlabs`: ElevenLabs Scribe v2 Realtimeを使用（デフォルト）
+  - Base64エンコードが必要（ペイロードサイズが約33%増加）
+  - 長時間の文字起こしセッションでは帯域幅とメモリ使用量に注意
 
 ⚠️ **セキュリティ注意**:
 

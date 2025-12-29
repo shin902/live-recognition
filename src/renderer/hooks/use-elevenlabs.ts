@@ -16,6 +16,8 @@ type UseElevenLabsReturn = {
 };
 
 export const MIN_API_KEY_LENGTH = 20;
+// ElevenLabs API keys typically start with 'sk_' and contain alphanumeric characters
+const ELEVENLABS_API_KEY_PATTERN = /^sk_[a-zA-Z0-9]{30,}$/;
 const isDebug = process.env.NODE_ENV !== 'production';
 
 /**
@@ -42,8 +44,11 @@ const debugLog = (...args: unknown[]) => {
 
   // Sanitize API keys and sensitive data from logs
   const sanitized = args.map((arg) => {
-    if (typeof arg === 'string' && arg.length > 30 && arg.includes('token')) {
-      return '[SANITIZED_API_KEY]';
+    if (typeof arg === 'string') {
+      // Sanitize potential API keys (long alphanumeric strings)
+      if (arg.length > 30 || /^[a-zA-Z0-9_-]{20,}$/.test(arg)) {
+        return '[SANITIZED]';
+      }
     }
     return arg;
   });
@@ -98,6 +103,11 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
     const trimmedKey = apiKey.trim();
     if (trimmedKey.length < MIN_API_KEY_LENGTH) {
       setError('APIキーの形式が正しくありません');
+      return;
+    }
+    // Validate ElevenLabs API key format
+    if (!ELEVENLABS_API_KEY_PATTERN.test(trimmedKey)) {
+      setError('ElevenLabs APIキーの形式が正しくありません（sk_で始まる必要があります）');
       return;
     }
 
@@ -267,7 +277,7 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
 
       // ElevenLabsはBase64エンコードされたJSONメッセージを期待
       // Int16Array -> Base64（効率的なチャンク処理）
-      const base64Audio = arrayBufferToBase64(audioData.buffer);
+      const base64Audio = arrayBufferToBase64(audioData.buffer as ArrayBuffer);
 
       const message = {
         message_type: 'input_audio_chunk',
