@@ -18,8 +18,23 @@ type UseDeepgramReturn = {
 export const KEEPALIVE_INTERVAL_MS = 10000;
 export const MIN_API_KEY_LENGTH = 20;
 const isDebug = process.env.NODE_ENV !== 'production';
+
+/**
+ * Debug logging utility - sanitizes sensitive data
+ * WARNING: Logs may contain transcript data in development mode
+ */
 const debugLog = (...args: unknown[]) => {
-  if (isDebug) console.log(...args);
+  if (!isDebug) return;
+  
+  // Sanitize API keys and sensitive data from logs
+  const sanitized = args.map((arg) => {
+    if (typeof arg === 'string' && arg.length > 30 && arg.includes('token')) {
+      return '[SANITIZED_API_KEY]';
+    }
+    return arg;
+  });
+  
+  console.log(...sanitized);
 };
 
 /**
@@ -191,13 +206,14 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   }, []);
 
   const disconnect = useCallback(() => {
-    if (socketRef.current) {
+    const socket = socketRef.current;
+    if (socket) {
       // 終了メッセージを送るのが行儀が良い
-      if (socketRef.current.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'CloseStream' }));
       }
-      socketRef.current.close();
-      socketRef.current = null;
+      socket.close();
+      // Note: socketRef.current will be cleared in onclose handler to avoid race conditions
     }
     if (keepAliveIntervalRef.current) {
       clearInterval(keepAliveIntervalRef.current.id);
@@ -226,6 +242,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   }, []);
 
   // コンポーネントアンマウント時に切断
+  // disconnect is a stable callback but included in deps for correctness
   useEffect(() => {
     return () => {
       disconnect();
