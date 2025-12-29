@@ -37,8 +37,13 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
   }, [onFinalTranscript]);
 
   const connect = useCallback((apiKey: string) => {
+    // Validate API key format (Deepgram keys are typically 32+ chars)
     if (!apiKey || apiKey.trim().length === 0) {
       setError('APIキーが無効です');
+      return;
+    }
+    if (apiKey.trim().length < 20) {
+      setError('APIキーの形式が正しくありません');
       return;
     }
 
@@ -118,23 +123,31 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
 
       socket.onclose = () => {
         debugLog('Deepgram WebSocket closed');
-        if (socketRef.current === socket) {
-          setIsConnected(false);
-          socketRef.current = null;
-        }
+        // Clear keepalive first to prevent race conditions
         if (keepAliveIntervalRef.current?.socket === socket) {
           clearInterval(keepAliveIntervalRef.current.id);
           keepAliveIntervalRef.current = null;
+        }
+        // Then reset connection state
+        if (socketRef.current === socket) {
+          setIsConnected(false);
+          socketRef.current = null;
         }
       };
 
       socket.onerror = (e) => {
         console.error('Deepgram WebSocket error:', e);
         setError('Deepgram接続エラーが発生しました');
+        // Clear keepalive interval immediately
         if (keepAliveIntervalRef.current?.socket === socket) {
           clearInterval(keepAliveIntervalRef.current.id);
           keepAliveIntervalRef.current = null;
         }
+        // Close the socket if still open
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.close();
+        }
+        // Reset connection state
         if (socketRef.current === socket) {
           setIsConnected(false);
           socketRef.current = null;
