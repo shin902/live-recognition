@@ -36,7 +36,7 @@ const debugLog = (...args: unknown[]) => {
     return arg;
   });
   
-  console.log(...sanitized);
+  console.info(...sanitized);
 };
 
 /**

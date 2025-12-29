@@ -8,7 +8,7 @@ const mockStart = vi.fn();
 const mockPause = vi.fn();
 const mockDestroy = vi.fn();
 type VadOptions = Parameters<typeof MicVAD.new>[0];
-let latestOptions: VadOptions | null;
+let latestOptions: VadOptions | null = null;
 
 vi.mock('@ricky0123/vad-web', () => ({
   MicVAD: {
