@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDeepgram, KEEPALIVE_INTERVAL_MS } from '../hooks/use-deepgram';
 
+/**
+ * Mock WebSocket implementation for testing
+ * Provides controlled WebSocket behavior with manual event triggering
+ */
 class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -24,15 +28,18 @@ class MockWebSocket {
     MockWebSocket.instances.push(this);
   }
 
+  /** Simulate WebSocket opening */
   triggerOpen() {
     this.readyState = MockWebSocket.OPEN;
     this.onopen?.();
   }
 
+  /** Simulate receiving a message */
   triggerMessage(data: any) {
     this.onmessage?.({ data } as MessageEvent);
   }
 
+  /** Simulate WebSocket error */
   triggerError(error: any) {
     this.onerror?.(error);
   }
@@ -55,16 +62,20 @@ afterEach(() => {
 });
 
 describe('useDeepgram', () => {
+  /**
+   * Test complete workflow: connect, keepalive, transcript aggregation
+   * Verifies that interim and final transcripts are handled correctly
+   */
   it('connects, sends keepalive, and aggregates transcripts', async () => {
     const onFinalTranscript = vi.fn();
     const { result } = renderHook(() => useDeepgram({ onFinalTranscript }));
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
     const socket = MockWebSocket.instances[0];
-    expect(socket.protocols).toEqual(['token', 'api-key']);
+    expect(socket.protocols).toEqual(['token', 'valid-api-key-with-sufficient-length']);
 
     act(() => {
       socket.triggerOpen();
@@ -126,11 +137,15 @@ describe('useDeepgram', () => {
     expect(socket.send).toHaveBeenCalledTimes(countBeforeClose);
   });
 
+  /**
+   * Test error handling and resource cleanup
+   * Ensures keepalive stops after error
+   */
   it('handles errors and closes connection', async () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
     const socket = MockWebSocket.instances[0];
@@ -159,7 +174,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -168,7 +183,7 @@ describe('useDeepgram', () => {
     });
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
     expect(MockWebSocket.instances.length).toBe(1);
@@ -178,19 +193,22 @@ describe('useDeepgram', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { result } = renderHook(() => useDeepgram());
 
-    act(() => {
-      result.current.sendAudio(new Int16Array([1, 2]));
-    });
+    try {
+      act(() => {
+        result.current.sendAudio(new Int16Array([1, 2]));
+      });
 
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('clears transcripts', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
     const socket = MockWebSocket.instances[0];
     act(() => socket.triggerOpen());
@@ -218,7 +236,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('api-key');
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
     const socket = MockWebSocket.instances[0];
@@ -226,13 +244,91 @@ describe('useDeepgram', () => {
 
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+    try {
+      act(() => {
+        socket.triggerMessage('not-json');
+      });
+
+      expect(result.current.transcript).toBe('');
+      expect(result.current.interimTranscript).toBe('');
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('rejects invalid API keys', () => {
+    const { result } = renderHook(() => useDeepgram());
+
     act(() => {
-      socket.triggerMessage('not-json');
+      result.current.connect('');
+    });
+    expect(result.current.error).toBe('APIキーが無効です');
+
+    act(() => {
+      result.current.connect('   ');
+    });
+    expect(result.current.error).toBe('APIキーが無効です');
+
+    act(() => {
+      result.current.connect('short');
+    });
+    expect(result.current.error).toBe('APIキーの形式が正しくありません');
+  });
+
+  it('prevents duplicate connections while CONNECTING', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    // First connect call creates socket in CONNECTING state
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
     });
 
-    expect(result.current.transcript).toBe('');
-    expect(result.current.interimTranscript).toBe('');
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
+    const firstSocket = MockWebSocket.instances[0];
+    expect(firstSocket.readyState).toBe(MockWebSocket.CONNECTING);
+
+    // Second connect call should be ignored while still CONNECTING
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    // Should still have only one socket instance
+    expect(MockWebSocket.instances.length).toBe(1);
+  });
+
+  it('allows reconnection after disconnect', () => {
+    const { result } = renderHook(() => useDeepgram());
+
+    // First connection
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    act(() => {
+      firstSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+
+    // Disconnect
+    act(() => {
+      result.current.disconnect();
+    });
+
+    expect(result.current.isConnected).toBe(false);
+
+    // Reconnect should work
+    act(() => {
+      result.current.connect('valid-api-key-with-sufficient-length');
+    });
+
+    const secondSocket = MockWebSocket.instances[1];
+    act(() => {
+      secondSocket.triggerOpen();
+    });
+
+    expect(result.current.isConnected).toBe(true);
+    expect(MockWebSocket.instances.length).toBe(2);
   });
 });
