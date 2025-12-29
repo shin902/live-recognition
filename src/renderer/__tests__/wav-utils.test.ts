@@ -24,7 +24,8 @@ describe('convertFloat32ToWav', () => {
     const view = new DataView(buffer);
 
     expect(readString(view, 0, 4)).toBe('RIFF');
-    expect(view.getUint32(4, true)).toBe(32 + audio.length * 2);
+    // File length = 36 + data size (not 32)
+    expect(view.getUint32(4, true)).toBe(36 + audio.length * 2);
     expect(readString(view, 8, 4)).toBe('WAVE');
     expect(view.getUint32(24, true)).toBe(16000);
     expect(view.getUint16(32, true)).toBe(2);
