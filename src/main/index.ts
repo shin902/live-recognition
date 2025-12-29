@@ -1,4 +1,14 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, MenuItemConstructorOptions, screen } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  ipcMain,
+  Menu,
+  MenuItemConstructorOptions,
+  screen,
+} from 'electron';
+// lint-staged test
+
 import dotenv from 'dotenv';
 import path from 'path';
 import { exec } from 'child_process';
@@ -78,89 +88,98 @@ let isGroqHandlerRegistered = false;
 const registerGroqHandler = (): void => {
   if (isGroqHandlerRegistered) return;
 
-  ipcMain.handle('groq:refine-text', async (_event, text: string): Promise<{ success: boolean; text?: string; error?: string }> => {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      return { success: false, error: 'Groq APIキーが設定されていません' };
+  ipcMain.handle(
+    'groq:refine-text',
+    async (_event, text: string): Promise<{ success: boolean; text?: string; error?: string }> => {
+      const apiKey = process.env.GROQ_API_KEY;
+      if (!apiKey) {
+        return { success: false, error: 'Groq APIキーが設定されていません' };
+      }
+
+      if (!text.trim()) {
+        return { success: true, text };
+      }
+
+      // プロンプト長制限チェック
+      if (text.length > GROQ_CONFIG.MAX_PROMPT_LENGTH) {
+        console.warn(
+          `Prompt too long (${text.length} chars), truncating to ${GROQ_CONFIG.MAX_PROMPT_LENGTH}`
+        );
+        text = text.slice(0, GROQ_CONFIG.MAX_PROMPT_LENGTH);
+      }
+
+      try {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: process.env.GROQ_MODEL || GROQ_CONFIG.DEFAULT_MODEL,
+            messages: [
+              {
+                role: 'user',
+                content: text,
+              },
+            ],
+            temperature: GROQ_CONFIG.TEMPERATURE,
+            max_tokens: GROQ_CONFIG.MAX_TOKENS,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => null);
+          const errorMessage =
+            errorData &&
+            typeof errorData === 'object' &&
+            'error' in errorData &&
+            errorData.error &&
+            typeof errorData.error === 'object' &&
+            'message' in errorData.error
+              ? String(errorData.error.message)
+              : `API error: ${response.status}`;
+          throw new Error(errorMessage);
+        }
+
+        const data = await response.json();
+
+        // レスポンス構造の検証
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid API response: not an object');
+        }
+
+        if (!('choices' in data) || !Array.isArray(data.choices) || data.choices.length === 0) {
+          throw new Error('Invalid API response: missing choices array');
+        }
+
+        const firstChoice = data.choices[0];
+        if (!firstChoice || typeof firstChoice !== 'object' || !('message' in firstChoice)) {
+          throw new Error('Invalid API response: missing message in choice');
+        }
+
+        const message = firstChoice.message;
+        if (!message || typeof message !== 'object' || !('content' in message)) {
+          throw new Error('Invalid API response: missing content in message');
+        }
+
+        const refinedText = typeof message.content === 'string' ? message.content.trim() : '';
+
+        if (!refinedText) {
+          throw new Error('整形結果が空です');
+        }
+
+        return { success: true, text: refinedText };
+      } catch (error) {
+        console.error('Groq refine error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : '整形に失敗しました',
+          text, // fallbackとして元のテキストを返す
+        };
+      }
     }
-
-    if (!text.trim()) {
-      return { success: true, text };
-    }
-
-    // プロンプト長制限チェック
-    if (text.length > GROQ_CONFIG.MAX_PROMPT_LENGTH) {
-      console.warn(`Prompt too long (${text.length} chars), truncating to ${GROQ_CONFIG.MAX_PROMPT_LENGTH}`);
-      text = text.slice(0, GROQ_CONFIG.MAX_PROMPT_LENGTH);
-    }
-
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: process.env.GROQ_MODEL || GROQ_CONFIG.DEFAULT_MODEL,
-          messages: [
-            {
-              role: 'user',
-              content: text,
-            },
-          ],
-          temperature: GROQ_CONFIG.TEMPERATURE,
-          max_tokens: GROQ_CONFIG.MAX_TOKENS,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        const errorMessage = 
-          errorData && typeof errorData === 'object' && 'error' in errorData && 
-          errorData.error && typeof errorData.error === 'object' && 'message' in errorData.error
-            ? String(errorData.error.message)
-            : `API error: ${response.status}`;
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      
-      // レスポンス構造の検証
-      if (!data || typeof data !== 'object') {
-        throw new Error('Invalid API response: not an object');
-      }
-      
-      if (!('choices' in data) || !Array.isArray(data.choices) || data.choices.length === 0) {
-        throw new Error('Invalid API response: missing choices array');
-      }
-      
-      const firstChoice = data.choices[0];
-      if (!firstChoice || typeof firstChoice !== 'object' || !('message' in firstChoice)) {
-        throw new Error('Invalid API response: missing message in choice');
-      }
-      
-      const message = firstChoice.message;
-      if (!message || typeof message !== 'object' || !('content' in message)) {
-        throw new Error('Invalid API response: missing content in message');
-      }
-      
-      const refinedText = typeof message.content === 'string' ? message.content.trim() : '';
-
-      if (!refinedText) {
-        throw new Error('整形結果が空です');
-      }
-
-      return { success: true, text: refinedText };
-    } catch (error) {
-      console.error('Groq refine error:', error);
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : '整形に失敗しました',
-        text // fallbackとして元のテキストを返す
-      };
-    }
-  });
+  );
   isGroqHandlerRegistered = true;
 };
 
@@ -173,47 +192,50 @@ let isPasteHandlerRegistered = false;
 const registerPasteHandler = (): void => {
   if (isPasteHandlerRegistered) return;
 
-  ipcMain.handle('paste-to-active-window', async (_event, text: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      // クリップボードにテキストをコピー
-      clipboard.writeText(text);
+  ipcMain.handle(
+    'paste-to-active-window',
+    async (_event, text: string): Promise<{ success: boolean; error?: string }> => {
+      try {
+        // クリップボードにテキストをコピー
+        clipboard.writeText(text);
 
-      // macOSの場合
-      if (process.platform === 'darwin') {
-        // ウィンドウを閉じる（次のウィンドウが自動的にアクティブになる）
-        if (mainWindow) {
-          mainWindow.hide();
+        // macOSの場合
+        if (process.platform === 'darwin') {
+          // ウィンドウを閉じる（次のウィンドウが自動的にアクティブになる）
+          if (mainWindow) {
+            mainWindow.hide();
+          }
+
+          // 少し待ってから次のアクティブウィンドウにCmd+Vを送信
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              exec(
+                `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
+                (error) => {
+                  if (error) {
+                    console.error('Paste simulation error:', error);
+                    resolve({ success: false, error: error.message });
+                  } else {
+                    // 貼り付け成功後、アプリを終了
+                    setTimeout(() => {
+                      app.quit();
+                    }, 100);
+                    resolve({ success: true });
+                  }
+                }
+              );
+            }, 150); // ウィンドウ切り替えを待つ
+          });
         }
 
-        // 少し待ってから次のアクティブウィンドウにCmd+Vを送信
-        return new Promise((resolve) => {
-          setTimeout(() => {
-            exec(
-              `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
-              (error) => {
-                if (error) {
-                  console.error('Paste simulation error:', error);
-                  resolve({ success: false, error: error.message });
-                } else {
-                  // 貼り付け成功後、アプリを終了
-                  setTimeout(() => {
-                    app.quit();
-                  }, 100);
-                  resolve({ success: true });
-                }
-              }
-            );
-          }, 150); // ウィンドウ切り替えを待つ
-        });
+        // Windows/Linuxの場合（未実装）
+        return { success: false, error: 'このプラットフォームではサポートされていません' };
+      } catch (error) {
+        console.error('Paste handler error:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
       }
-      
-      // Windows/Linuxの場合（未実装）
-      return { success: false, error: 'このプラットフォームではサポートされていません' };
-    } catch (error) {
-      console.error('Paste handler error:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
-  });
+  );
   isPasteHandlerRegistered = true;
 };
 
@@ -226,40 +248,48 @@ let isResizeHandlerRegistered = false;
 const registerResizeHandler = (): void => {
   if (isResizeHandlerRegistered) return;
 
-  ipcMain.handle('resize-window', async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
-    try {
-      // 入力値の検証（型・範囲・有限数）
-      const MAX_REASONABLE_HEIGHT = 10000; // 10000px以上は異常値
-      if (typeof height !== 'number' || !isFinite(height) || height < 0 || height > MAX_REASONABLE_HEIGHT) {
-        console.warn('Invalid resize attempt:', { height, type: typeof height });
-        return { success: false, error: 'Invalid height parameter' };
-      }
-      
-      if (!mainWindow) {
-        return { success: false, error: 'Window not found' };
-      }
+  ipcMain.handle(
+    'resize-window',
+    async (_event, height: number): Promise<{ success: boolean; error?: string }> => {
+      try {
+        // 入力値の検証（型・範囲・有限数）
+        const MAX_REASONABLE_HEIGHT = 10000; // 10000px以上は異常値
+        if (
+          typeof height !== 'number' ||
+          !isFinite(height) ||
+          height < 0 ||
+          height > MAX_REASONABLE_HEIGHT
+        ) {
+          console.warn('Invalid resize attempt:', { height, type: typeof height });
+          return { success: false, error: 'Invalid height parameter' };
+        }
 
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { height: screenHeight } = primaryDisplay.workAreaSize;
-      const width = WINDOW_CONFIG.WIDTH;
-      
-      // 最小・最大高さの制約
-      const MIN_HEIGHT = 160;
-      const MAX_HEIGHT = Math.floor(screenHeight * 0.8);
-      const constrainedHeight = Math.max(MIN_HEIGHT, Math.min(height, MAX_HEIGHT));
-      
-      // Y座標を再計算（画面下部中央を維持）
-      const x = Math.round((primaryDisplay.workAreaSize.width - width) / 2);
-      const y = Math.max(0, screenHeight - constrainedHeight - WINDOW_CONFIG.MARGIN_BOTTOM);
-      
-      mainWindow.setBounds({ width, height: constrainedHeight, x, y });
-      
-      return { success: true };
-    } catch (error) {
-      console.error('Resize handler error:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+        if (!mainWindow) {
+          return { success: false, error: 'Window not found' };
+        }
+
+        const primaryDisplay = screen.getPrimaryDisplay();
+        const { height: screenHeight } = primaryDisplay.workAreaSize;
+        const width = WINDOW_CONFIG.WIDTH;
+
+        // 最小・最大高さの制約
+        const MIN_HEIGHT = 160;
+        const MAX_HEIGHT = Math.floor(screenHeight * 0.8);
+        const constrainedHeight = Math.max(MIN_HEIGHT, Math.min(height, MAX_HEIGHT));
+
+        // Y座標を再計算（画面下部中央を維持）
+        const x = Math.round((primaryDisplay.workAreaSize.width - width) / 2);
+        const y = Math.max(0, screenHeight - constrainedHeight - WINDOW_CONFIG.MARGIN_BOTTOM);
+
+        mainWindow.setBounds({ width, height: constrainedHeight, x, y });
+
+        return { success: true };
+      } catch (error) {
+        console.error('Resize handler error:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+      }
     }
-  });
+  );
   isResizeHandlerRegistered = true;
 };
 
@@ -301,7 +331,7 @@ const createWindow = (): void => {
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     const logPrefix = '[Renderer]';
     const location = sourceId ? ` (${sourceId}:${line})` : '';
-    
+
     switch (level) {
       case 0: // verbose/debug
         console.log(`${logPrefix} ${message}${location}`);
