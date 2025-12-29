@@ -40,8 +40,10 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
     if (
       socketRef.current?.readyState === WebSocket.OPEN ||
       socketRef.current?.readyState === WebSocket.CONNECTING
-    )
+    ) {
+      debugLog('Already connected or connecting, ignoring connect request');
       return;
+    }
 
     if (
       socketRef.current &&
@@ -64,7 +66,7 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
         setIsConnected(true);
         setError(null);
 
-         // KeepAlive (10秒ごとに送信)
+        // KeepAlive (10秒ごとに送信)
         keepAliveIntervalRef.current = setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'KeepAlive' }));
@@ -110,12 +112,14 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
 
       socket.onclose = () => {
         debugLog('Deepgram WebSocket closed');
-        setIsConnected(false);
+        if (socketRef.current === socket) {
+          setIsConnected(false);
+          socketRef.current = null;
+        }
         if (keepAliveIntervalRef.current) {
           clearInterval(keepAliveIntervalRef.current);
           keepAliveIntervalRef.current = null;
         }
-        socketRef.current = null;
       };
 
       socket.onerror = (e) => {
@@ -125,8 +129,10 @@ export function useDeepgram(options: UseDeepgramOptions = {}): UseDeepgramReturn
           clearInterval(keepAliveIntervalRef.current);
           keepAliveIntervalRef.current = null;
         }
-        setIsConnected(false);
-        socketRef.current = null;
+        if (socketRef.current === socket) {
+          setIsConnected(false);
+          socketRef.current = null;
+        }
       };
     } catch (err) {
       setError(err instanceof Error ? err.message : '接続に失敗しました');

@@ -139,19 +139,20 @@ describe('useDeepgram', () => {
       socket.triggerOpen();
     });
 
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    const keepaliveBefore = socket.send.mock.calls.length;
+
     act(() => {
       socket.triggerError(new Event('error'));
     });
 
     expect(result.current.error).toBe('Deepgram接続エラーが発生しました');
 
-    act(() => {
-      socket.onclose?.();
-    });
+    vi.advanceTimersByTime(KEEPALIVE_INTERVAL_MS);
+    const keepaliveAfter = socket.send.mock.calls.length;
+    expect(keepaliveAfter).toBe(keepaliveBefore);
 
     expect(result.current.isConnected).toBe(false);
-
-    expect(result.current.error).toBe('Deepgram接続エラーが発生しました');
   });
 
   it('does not reconnect when already connected', () => {
