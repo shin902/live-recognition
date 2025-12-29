@@ -26,6 +26,8 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.1",
+    "@testing-library/jest-dom": "^6.6.3",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
@@ -37,11 +39,12 @@
     "electron-builder": "^24.6.4",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
+    "jsdom": "^22.1.0",
     "prettier": "^3.1.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
     "vite-plugin-static-copy": "^3.1.4",
-    "vitest": "^4.0.16",
+    "vitest": "^2.1.4",
     "wait-on": "^7.0.1"
   }
 }

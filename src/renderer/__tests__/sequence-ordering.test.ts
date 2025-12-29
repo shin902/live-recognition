@@ -4,6 +4,8 @@
  * このテストは並行実行される整形処理が正しい順序で表示されることを検証します
  */
 
+import { describe, it, expect } from 'vitest';
+
 describe('Sequence Ordering Logic', () => {
   describe('順序保証の基本動作', () => {
     it('should process sequences in order even when completed out of order', () => {
