@@ -10,6 +10,7 @@ import {
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
+import { useElevenLabs } from './hooks/use-elevenlabs';
 import { VoiceStatus } from './components/VoiceStatus';
 import refinePromptTemplate from './prompts/refine-text.txt?raw';
 
@@ -46,9 +47,10 @@ interface ConfigInfo {
   appVersion: string;
   nodeVersion: string;
   platform: string;
-  hasElevenLabsKey: boolean;
-  hasGroqKey: boolean;
+  speechProvider: 'deepgram' | 'elevenlabs';
   deepgramKey: string;
+  elevenLabsKey: string;
+  hasGroqKey: boolean;
   error?: string;
 }
 
@@ -423,37 +425,42 @@ export default function App(): JSX.Element {
     [processSentence]
   );
 
-  // Deepgram Hook
+  // 両方のフックを呼び出す（Reactのルール：条件付きでフックを呼ぶことはできない）
+  const deepgramHook = useDeepgram({ onFinalTranscript: handleFinalTranscript });
+  const elevenLabsHook = useElevenLabs({ onFinalTranscript: handleFinalTranscript });
+
+  // プロバイダーに応じて使用するフックを選択
+  const speechHook = config?.speechProvider === 'elevenlabs' ? elevenLabsHook : deepgramHook;
   const {
     connect,
     disconnect,
     sendAudio,
     interimTranscript,
-    isConnected: isDeepgramConnected,
-    error: deepgramError,
+    isConnected: isSpeechConnected,
+    error: speechError,
     clearTranscript,
-  } = useDeepgram({ onFinalTranscript: handleFinalTranscript });
+  } = speechHook;
 
   // onAudioDataコールバックをuseCallbackでメモ化
   const handleAudioData = useCallback(
     (data: Int16Array) => {
       console.info('🎙️  Audio data received from VAD, length:', data.length);
-      // Deepgramに接続済みなら送信
-      if (isDeepgramConnected) {
-        console.info('✅ Sending to Deepgram (connected:', isDeepgramConnected, ')');
+      // 音声認識サービスに接続済みなら送信
+      if (isSpeechConnected) {
+        console.info('✅ Sending to speech service (connected:', isSpeechConnected, ')');
         sendAudio(data);
       } else {
-        console.warn('⏸️  Not sending (connected:', isDeepgramConnected, ')');
+        console.warn('⏸️  Not sending (connected:', isSpeechConnected, ')');
       }
     },
-    [isDeepgramConnected, sendAudio]
+    [isSpeechConnected, sendAudio]
   );
 
   // VAD onSpeechEnd時の処理（transcriptのクリアのみ）
   const handleSpeechEnd = useCallback(
     async (_blob: Blob) => {
       console.info('🎤 Speech ended, clearing interim transcript');
-      clearTranscript(); // Deepgramのinterim transcriptをクリア
+      clearTranscript(); // 音声認識サービスのinterim transcriptをクリア
     },
     [clearTranscript]
   );
@@ -472,41 +479,46 @@ export default function App(): JSX.Element {
     },
   });
 
-  // Toggle処理: VADとDeepgramの接続を同期させる
+  // Toggle処理: VADと音声認識サービスの接続を同期させる
   const handleToggle = useCallback(async () => {
     console.info('🔘 Toggle button clicked. Current state - isListening:', isListening);
 
-    if (!config?.deepgramKey) {
-      console.error('❌ No Deepgram API key found');
-      setError('Deepgram APIキーが設定されていません');
+    // 使用する音声認識APIキーを取得
+    const apiKey =
+      config?.speechProvider === 'elevenlabs' ? config.elevenLabsKey : config.deepgramKey;
+    const providerName = config?.speechProvider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
+
+    if (!apiKey) {
+      console.error(`❌ No ${providerName} API key found`);
+      setError(`${providerName} APIキーが設定されていません`);
       return;
     }
 
     if (isListening) {
       // 停止処理：まずVADを停止してから接続を切断
-      console.info('⏹️  Stopping: VAD and Deepgram');
+      console.info(`⏹️  Stopping: VAD and ${providerName}`);
       await toggleListening(); // VAD停止（非同期）
-      disconnect(); // Deepgram切断
+      disconnect(); // 音声認識サービス切断
     } else {
-      // 開始処理：まずDeepgramに接続してからVADを開始
-      console.info('▶️  Starting: Deepgram connection and VAD');
-      connect(config.deepgramKey); // Deepgram接続（即座にWebSocket接続開始）
+      // 開始処理：まず音声認識サービスに接続してからVADを開始
+      console.info(`▶️  Starting: ${providerName} connection and VAD`);
+      connect(apiKey); // 音声認識サービス接続（即座にWebSocket接続開始）
       await toggleListening(); // VAD開始（非同期で待機）
       console.info('✅ VAD started, now listening');
     }
   }, [isListening, toggleListening, connect, disconnect, config]);
 
-  // Deepgramのエラーを画面に反映
+  // 音声認識サービスのエラーを画面に反映
   useEffect(() => {
-    if (deepgramError) {
-      setError(deepgramError);
+    if (speechError) {
+      setError(speechError);
       // エラー時は停止する
       if (isListening) {
         void toggleListening();
         disconnect();
       }
     }
-  }, [deepgramError, isListening, toggleListening, disconnect]);
+  }, [speechError, isListening, toggleListening, disconnect]);
 
   // コンポーネントがアンマウントされる際のクリーンアップ
   useEffect(() => {
@@ -518,7 +530,11 @@ export default function App(): JSX.Element {
   // 起動時に自動的に文字起こしモードを開始
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (config?.deepgramKey && !loading && !error && !vadLoading && !autoStartedRef.current) {
+    // 使用する音声認識APIキーがあるかチェック
+    const hasApiKey =
+      config?.speechProvider === 'elevenlabs' ? !!config.elevenLabsKey : !!config.deepgramKey;
+
+    if (hasApiKey && !loading && !error && !vadLoading && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void handleToggle();
     }

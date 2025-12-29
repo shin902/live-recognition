@@ -13,6 +13,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { exec } from 'child_process';
 import { computeWindowBounds } from './window-metrics';
+import { getSpeechProvider } from '../config/speech-provider';
 
 // 環境変数の読み込み
 dotenv.config();
@@ -56,9 +57,7 @@ const registerGetConfigHandler = (): void => {
   ipcMain.handle('get-config', async (): Promise<ConfigResponse> => {
     try {
       // 環境変数からプロバイダーを取得（デフォルト: deepgram）
-      const speechProvider = (
-        process.env.SPEECH_PROVIDER?.toLowerCase() === 'elevenlabs' ? 'elevenlabs' : 'deepgram'
-      ) as 'deepgram' | 'elevenlabs';
+      const speechProvider = getSpeechProvider();
 
       return {
         appVersion: app.getVersion(),

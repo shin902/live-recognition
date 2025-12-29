@@ -19,6 +19,21 @@ export const MIN_API_KEY_LENGTH = 20;
 const isDebug = process.env.NODE_ENV !== 'production';
 
 /**
+ * ArrayBufferを効率的にBase64エンコード
+ * 大きな配列を一度に展開せず、チャンク単位で処理
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000; // 32KB chunks
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/**
  * Debug logging utility - sanitizes sensitive data
  * WARNING: Logs may contain transcript data in development mode
  */
@@ -251,8 +266,8 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
       );
 
       // ElevenLabsはBase64エンコードされたJSONメッセージを期待
-      // Int16Array -> Base64
-      const base64Audio = btoa(String.fromCharCode(...new Uint8Array(audioData.buffer)));
+      // Int16Array -> Base64（効率的なチャンク処理）
+      const base64Audio = arrayBufferToBase64(audioData.buffer);
 
       const message = {
         message_type: 'input_audio_chunk',
