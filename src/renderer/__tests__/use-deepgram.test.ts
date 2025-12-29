@@ -56,6 +56,9 @@ class MockWebSocket {
 
 let originalWebSocket: typeof WebSocket | undefined;
 
+// Valid Deepgram API key format for testing (40 hex characters)
+const VALID_API_KEY = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+
 beforeEach(() => {
   vi.useFakeTimers();
   MockWebSocket.instances = [];
@@ -80,11 +83,11 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram({ onFinalTranscript }));
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
-    expect(socket.protocols).toEqual(['token', 'valid-api-key-with-sufficient-length']);
+    expect(socket.protocols).toEqual(['token', VALID_API_KEY]);
 
     act(() => {
       socket.triggerOpen();
@@ -154,7 +157,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -183,7 +186,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -192,7 +195,7 @@ describe('useDeepgram', () => {
     });
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     expect(MockWebSocket.instances.length).toBe(1);
@@ -217,7 +220,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
     const socket = MockWebSocket.instances[0];
     act(() => socket.triggerOpen());
@@ -245,7 +248,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram());
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -269,16 +272,19 @@ describe('useDeepgram', () => {
   it('rejects invalid API keys', () => {
     const { result } = renderHook(() => useDeepgram());
 
+    // Empty key
     act(() => {
       result.current.connect('');
     });
     expect(result.current.error).toBe('APIキーが無効です');
 
+    // Whitespace only
     act(() => {
       result.current.connect('   ');
     });
     expect(result.current.error).toBe('APIキーが無効です');
 
+    // Too short
     act(() => {
       result.current.connect('short');
     });
@@ -289,6 +295,18 @@ describe('useDeepgram', () => {
       result.current.connect('a'.repeat(MIN_API_KEY_LENGTH - 1));
     });
     expect(result.current.error).toBe('APIキーの形式が正しくありません');
+
+    // Invalid format (not 40 hex characters)
+    act(() => {
+      result.current.connect('this-is-not-a-valid-deepgram-api-key!');
+    });
+    expect(result.current.error).toBe('Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）');
+
+    // Valid length but invalid characters
+    act(() => {
+      result.current.connect('z'.repeat(40));
+    });
+    expect(result.current.error).toBe('Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）');
   });
 
   it('prevents duplicate connections while CONNECTING', () => {
@@ -296,7 +314,7 @@ describe('useDeepgram', () => {
 
     // First connect call creates socket in CONNECTING state
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -304,7 +322,7 @@ describe('useDeepgram', () => {
 
     // Second connect call should be ignored while still CONNECTING
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     // Should still have only one socket instance
@@ -316,7 +334,7 @@ describe('useDeepgram', () => {
 
     // First connection
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -335,7 +353,7 @@ describe('useDeepgram', () => {
 
     // Reconnect should work
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
@@ -352,7 +370,7 @@ describe('useDeepgram', () => {
 
     // Rapid connect/disconnect/connect
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -369,7 +387,7 @@ describe('useDeepgram', () => {
     expect(result.current.isConnected).toBe(false);
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
@@ -394,7 +412,7 @@ describe('useDeepgram', () => {
     const { result } = renderHook(() => useDeepgram({ onFinalTranscript }));
 
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -427,7 +445,7 @@ describe('useDeepgram', () => {
 
     // First connection
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -448,7 +466,7 @@ describe('useDeepgram', () => {
 
     // Reconnect should work after error
     act(() => {
-      result.current.connect('valid-api-key-with-sufficient-length');
+      result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
