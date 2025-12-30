@@ -485,7 +485,7 @@ export default function App(): JSX.Element {
 
     // 使用する音声認識APIキーを取得
     const apiKey =
-      config?.speechProvider === 'elevenlabs' ? config.elevenLabsKey : config.deepgramKey;
+      config?.speechProvider === 'elevenlabs' ? config?.elevenLabsKey : config?.deepgramKey;
     const providerName = config?.speechProvider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
 
     if (!apiKey) {
@@ -532,7 +532,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     // 使用する音声認識APIキーがあるかチェック
     const hasApiKey =
-      config?.speechProvider === 'elevenlabs' ? !!config.elevenLabsKey : !!config.deepgramKey;
+      config?.speechProvider === 'elevenlabs' ? !!config?.elevenLabsKey : !!config?.deepgramKey;
 
     if (hasApiKey && !loading && !error && !vadLoading && !autoStartedRef.current) {
       autoStartedRef.current = true;
