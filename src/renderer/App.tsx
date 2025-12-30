@@ -1,4 +1,12 @@
-import { Component, type ErrorInfo, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import './App.css';
 import { useVoiceInput } from './hooks/use-voice-input';
 import { useDeepgram } from './hooks/use-deepgram';
@@ -136,7 +144,7 @@ export default function App(): JSX.Element {
   const [bufferText, setBufferText] = useState(''); // バッファのテキスト（未整形）を表示用に保持
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
-  const [isManuallyEdited, setIsManuallyEdited] = useState(false); // ユーザー編集フラグ
+
   const processedTranscriptsRef = useRef<Map<string, number>>(new Map()); // 処理済みテキストとタイムスタンプ
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
@@ -205,16 +213,16 @@ export default function App(): JSX.Element {
   const displayCompletedResults = useCallback(() => {
     if (!isMountedRef.current) return; // アンマウント後は実行しない
     if (isDisplayingRef.current) return; // 既に表示処理中の場合はスキップ（競合状態防止）
-    
+
     isDisplayingRef.current = true;
     const now = Date.now();
-    
-    setRefinedText(prev => {
+
+    setRefinedText((prev) => {
       // 手動編集されている場合は既存のテキストをそのまま保持しつつ、新しい音声認識結果を追加
       const parts: string[] = prev ? [prev] : [];
       let shouldRetry = false;
       let hasDisplayedAny = false;
-      
+
       // 次に表示すべきシーケンスIDから順に処理
       while (completedResultsRef.current.has(nextToDisplayRef.current)) {
         const result = completedResultsRef.current.get(nextToDisplayRef.current)!;
@@ -225,17 +233,17 @@ export default function App(): JSX.Element {
         nextToDisplayRef.current++;
         hasDisplayedAny = true;
       }
-      
+
       // 表示があった場合は再試行カウンターをリセット
       if (hasDisplayedAny) {
         displayRetryCountRef.current = 0;
       }
-      
+
       // タイムアウトまたは大きなギャップがある場合、スタックしたシーケンスをスキップ
       const gap = sequenceIdRef.current - nextToDisplayRef.current;
       if (gap > TRANSCRIPT_CONFIG.MAX_SEQUENCE_GAP) {
         const oldestTimestamp = sequenceTimestampsRef.current.get(nextToDisplayRef.current);
-        
+
         if (oldestTimestamp && now - oldestTimestamp > TRANSCRIPT_CONFIG.SEQUENCE_TIMEOUT_MS) {
           console.warn(`⚠️  Skipping stuck sequence ${nextToDisplayRef.current} (timeout)`);
           sequenceTimestampsRef.current.delete(nextToDisplayRef.current);
@@ -247,14 +255,15 @@ export default function App(): JSX.Element {
           shouldRetry = true;
         }
       }
-      
+
       // メモリリーク防止: completedResultsRefの最大サイズを常に強制
       if (completedResultsRef.current.size > TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS) {
-        const sortedEntries = Array.from(completedResultsRef.current.entries())
-          .sort(([a], [b]) => a - b);
+        const sortedEntries = Array.from(completedResultsRef.current.entries()).sort(
+          ([a], [b]) => a - b
+        );
         const toKeep = sortedEntries.slice(-TRANSCRIPT_CONFIG.MAX_COMPLETED_RESULTS);
         completedResultsRef.current = new Map(toKeep);
-        
+
         // 対応するタイムスタンプもクリーンアップ
         for (const [seqId] of sequenceTimestampsRef.current) {
           if (!completedResultsRef.current.has(seqId) && seqId < nextToDisplayRef.current) {
@@ -262,7 +271,7 @@ export default function App(): JSX.Element {
           }
         }
       }
-      
+
       // スキップ後に再試行が必要な場合、次のtickで再実行（最大回数制限付き）
       if (shouldRetry && isMountedRef.current) {
         displayRetryCountRef.current++;
@@ -285,88 +294,86 @@ export default function App(): JSX.Element {
           isDisplayingRef.current = false;
         });
       }
-      
+
       const newText = parts.join('');
       refinedTextRef.current = newText; // refを更新
       return newText;
     });
-    
-    // 新しい音声認識結果が追加されたら手動編集フラグをリセット
-    if (completedResultsRef.current.size > 0) {
-      setIsManuallyEdited(false);
-    }
   }, []);
 
   // 句点で区切って一文ごとに処理する関数
-  const processSentence = useCallback(async (sentence: string) => {
-    // 空のテキストはスキップ
-    if (!sentence.trim()) {
-      return;
-    }
-    
-    // 既に処理済みのテキストはスキップ
-    if (processedTranscriptsRef.current.has(sentence)) {
-      console.info('⏭️  Skipping duplicate sentence:', sentence);
-      return;
-    }
-    
-    const sequenceId = sequenceIdRef.current++;
-    const startTime = Date.now();
-    console.info(`🎯 Processing sentence [seq:${sequenceId}]:`, sentence);
-    processedTranscriptsRef.current.set(sentence, startTime);
-    sequenceTimestampsRef.current.set(sequenceId, startTime);
-    
-    // メモリリーク防止: 古いエントリを削除（サイズベース）
-    if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
-      const entries = Array.from(processedTranscriptsRef.current.entries());
-      const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
-      processedTranscriptsRef.current = new Map(keepEntries);
-    }
-    
-    // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
-    const now = Date.now();
-    for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
-      if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
-        sequenceTimestampsRef.current.delete(seqId);
-        completedResultsRef.current.delete(seqId);
+  const processSentence = useCallback(
+    async (sentence: string) => {
+      // 空のテキストはスキップ
+      if (!sentence.trim()) {
+        return;
       }
-    }
-    // processedTranscriptsRefも時間ベースでクリーンアップ
-    for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
-      if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
-        processedTranscriptsRef.current.delete(txt);
-      }
-    }
-    
-    // 即座に整形開始（非同期で待たない）
-    void (async () => {
-      try {
-        console.info(`🔄 Refining sentence [seq:${sequenceId}]:`, sentence);
-        // refinedTextRefから最新の文脈を取得
-        const currentContext = refinedTextRef.current;
-        const refined = await refineText(sentence, currentContext);
-        // 改行を削除して1行のテキストにする
-        const refinedWithoutNewlines = refined.replace(/\n+/g, '');
-        console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
 
-        if (!isMountedRef.current) return; // アンマウント後は処理しない
-
-        // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
-        completedResultsRef.current.set(sequenceId, refinedWithoutNewlines);
-        
-        // 順序通りに表示
-        displayCompletedResults();
-      } catch (err) {
-        console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
-        
-        if (!isMountedRef.current) return; // アンマウント後は処理しない
-        
-        // エラー時はフォールバックとして元のテキストを使用
-        completedResultsRef.current.set(sequenceId, sentence);
-        displayCompletedResults();
+      // 既に処理済みのテキストはスキップ
+      if (processedTranscriptsRef.current.has(sentence)) {
+        console.info('⏭️  Skipping duplicate sentence:', sentence);
+        return;
       }
-    })();
-  }, [refineText, displayCompletedResults]);
+
+      const sequenceId = sequenceIdRef.current++;
+      const startTime = Date.now();
+      console.info(`🎯 Processing sentence [seq:${sequenceId}]:`, sentence);
+      processedTranscriptsRef.current.set(sentence, startTime);
+      sequenceTimestampsRef.current.set(sequenceId, startTime);
+
+      // メモリリーク防止: 古いエントリを削除（サイズベース）
+      if (processedTranscriptsRef.current.size > TRANSCRIPT_CONFIG.MAX_PROCESSED) {
+        const entries = Array.from(processedTranscriptsRef.current.entries());
+        const keepEntries = entries.slice(-Math.floor(TRANSCRIPT_CONFIG.MAX_PROCESSED / 2));
+        processedTranscriptsRef.current = new Map(keepEntries);
+      }
+
+      // メモリリーク防止: 古いエントリを削除（時間ベース - 1分以上前）
+      const now = Date.now();
+      for (const [seqId, timestamp] of sequenceTimestampsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          sequenceTimestampsRef.current.delete(seqId);
+          completedResultsRef.current.delete(seqId);
+        }
+      }
+      // processedTranscriptsRefも時間ベースでクリーンアップ
+      for (const [txt, timestamp] of processedTranscriptsRef.current.entries()) {
+        if (now - timestamp > TRANSCRIPT_CONFIG.CLEANUP_AGE_MS) {
+          processedTranscriptsRef.current.delete(txt);
+        }
+      }
+
+      // 即座に整形開始（非同期で待たない）
+      void (async () => {
+        try {
+          console.info(`🔄 Refining sentence [seq:${sequenceId}]:`, sentence);
+          // refinedTextRefから最新の文脈を取得
+          const currentContext = refinedTextRef.current;
+          const refined = await refineText(sentence, currentContext);
+          // 改行を削除して1行のテキストにする
+          const refinedWithoutNewlines = refined.replace(/\n+/g, '');
+          console.info(`✨ Refined result [seq:${sequenceId}]:`, refinedWithoutNewlines);
+
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+
+          // 整形完了をキューに格納（タイムスタンプはdisplayCompletedResults内で削除）
+          completedResultsRef.current.set(sequenceId, refinedWithoutNewlines);
+
+          // 順序通りに表示
+          displayCompletedResults();
+        } catch (err) {
+          console.error(`❌ Refinement error [seq:${sequenceId}]:`, err);
+
+          if (!isMountedRef.current) return; // アンマウント後は処理しない
+
+          // エラー時はフォールバックとして元のテキストを使用
+          completedResultsRef.current.set(sequenceId, sentence);
+          displayCompletedResults();
+        }
+      })();
+    },
+    [refineText, displayCompletedResults]
+  );
 
   // 確定テキストを受け取ったら句点・疑問符・感嘆符で区切って処理
   const handleFinalTranscript = useCallback(
@@ -376,17 +383,17 @@ export default function App(): JSX.Element {
         console.info('⏭️  Skipping empty transcript');
         return;
       }
-      
+
       console.info(`📥 Received transcript:`, text);
-      
+
       // バッファに追加
       sentenceBufferRef.current += text;
       console.info(`📝 Buffer content:`, sentenceBufferRef.current);
-      
+
       // 句点・疑問符・感嘆符で分割（。？！で区切る）
       // 正規表現で分割し、区切り文字も保持する
       const parts = sentenceBufferRef.current.split(/([。？！])/);
-      
+
       // 文と区切り文字を結合
       const sentences: string[] = [];
       for (let i = 0; i < parts.length - 1; i += 2) {
@@ -396,12 +403,12 @@ export default function App(): JSX.Element {
           sentences.push(sentence.trim() + delimiter);
         }
       }
-      
+
       // 最後の要素（区切り文字がない部分）はバッファに残す
       sentenceBufferRef.current = parts[parts.length - 1] || '';
       setBufferText(sentenceBufferRef.current); // バッファの内容を表示用ステートに反映
       console.info(`💾 Remaining buffer:`, sentenceBufferRef.current);
-      
+
       // 区切り文字で終わる完全な文を処理
       for (const sentence of sentences) {
         if (sentence.trim()) {
@@ -525,15 +532,15 @@ export default function App(): JSX.Element {
 
     const timeoutId = setTimeout(async () => {
       if (!textareaRef.current) return;
-      
+
       const currentHeight = textareaRef.current.scrollHeight;
       prevHeightRef.current = currentHeight;
-      
+
       const totalHeight = Math.max(
-        TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT, 
+        TRANSCRIPT_CONFIG.MIN_WINDOW_HEIGHT,
         currentHeight + TRANSCRIPT_CONFIG.CONTROL_BAR_HEIGHT + TRANSCRIPT_CONFIG.VERTICAL_PADDING
       );
-      
+
       try {
         await window.electronAPI.resizeWindow(totalHeight);
       } catch (err) {
@@ -547,17 +554,18 @@ export default function App(): JSX.Element {
   // textareaの自動スクロール
   useEffect(() => {
     if (!textareaRef.current || isUserScrolling) return;
-    
+
     textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
-  }, [refinedText, isUserScrolling]);
+  }, [refinedText, bufferText, interimTranscript, isUserScrolling]);
 
   // スクロール検出
   const handleScroll = useCallback(() => {
     if (!textareaRef.current) return;
-    
+
     const { scrollTop, scrollHeight, clientHeight } = textareaRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < TRANSCRIPT_CONFIG.SCROLL_BOTTOM_THRESHOLD;
-    
+    const isAtBottom =
+      scrollHeight - scrollTop - clientHeight < TRANSCRIPT_CONFIG.SCROLL_BOTTOM_THRESHOLD;
+
     setIsUserScrolling(!isAtBottom);
   }, []);
 
@@ -565,15 +573,15 @@ export default function App(): JSX.Element {
   const saveSelection = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return null;
-    
+
     const range = selection.getRangeAt(0);
     const preSelectionRange = range.cloneRange();
     if (!textareaRef.current) return null;
-    
+
     preSelectionRange.selectNodeContents(textareaRef.current);
     preSelectionRange.setEnd(range.startContainer, range.startOffset);
     const start = preSelectionRange.toString().length;
-    
+
     return {
       start,
       end: start + range.toString().length,
@@ -582,21 +590,25 @@ export default function App(): JSX.Element {
 
   const restoreSelection = useCallback((savedSelection: { start: number; end: number } | null) => {
     if (!savedSelection || !textareaRef.current) return;
-    
+
     const selection = window.getSelection();
     if (!selection) return;
-    
+
     const range = document.createRange();
     let charIndex = 0;
-    let nodeStack = [textareaRef.current];
+    const nodeStack = [textareaRef.current];
     let node: Node | undefined;
     let foundStart = false;
     let stop = false;
-    
+
     while (!stop && (node = nodeStack.pop())) {
       if (node.nodeType === Node.TEXT_NODE) {
         const nextCharIndex = charIndex + (node.textContent?.length || 0);
-        if (!foundStart && savedSelection.start >= charIndex && savedSelection.start <= nextCharIndex) {
+        if (
+          !foundStart &&
+          savedSelection.start >= charIndex &&
+          savedSelection.start <= nextCharIndex
+        ) {
           range.setStart(node, savedSelection.start - charIndex);
           foundStart = true;
         }
@@ -612,36 +624,37 @@ export default function App(): JSX.Element {
         }
       }
     }
-    
+
     selection.removeAllRanges();
     selection.addRange(range);
   }, []);
 
   // contentEditableのinputハンドラー（カーソル位置保持版）
-  const handleContentEditableInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
-    const savedSelection = saveSelection();
-    const target = e.currentTarget;
-    const newText = target.textContent || '';
-    
-    // バッファ部分を含まない編集のみ受け入れる
-    if (bufferText && newText.endsWith(bufferText)) {
-      // バッファが末尾にある場合、それを除いた部分だけを更新
-      const refinedPart = newText.slice(0, -bufferText.length);
-      setRefinedText(refinedPart);
-      refinedTextRef.current = refinedPart;
-    } else {
-      // バッファが削除された場合は全体を更新
-      setRefinedText(newText);
-      refinedTextRef.current = newText;
-    }
-    
-    setIsManuallyEdited(true);
-    
-    // カーソル位置を復元
-    setTimeout(() => {
-      restoreSelection(savedSelection);
-    }, 0);
-  }, [bufferText, saveSelection, restoreSelection]);
+  const handleContentEditableInput = useCallback(
+    (e: React.FormEvent<HTMLDivElement>) => {
+      const savedSelection = saveSelection();
+      const target = e.currentTarget;
+      const newText = target.textContent || '';
+
+      // バッファ部分を含まない編集のみ受け入れる
+      if (bufferText && newText.endsWith(bufferText)) {
+        // バッファが末尾にある場合、それを除いた部分だけを更新
+        const refinedPart = newText.slice(0, -bufferText.length);
+        setRefinedText(refinedPart);
+        refinedTextRef.current = refinedPart;
+      } else {
+        // バッファが削除された場合は全体を更新
+        setRefinedText(newText);
+        refinedTextRef.current = newText;
+      }
+
+      // カーソル位置を復元
+      setTimeout(() => {
+        restoreSelection(savedSelection);
+      }, 0);
+    },
+    [bufferText, saveSelection, restoreSelection]
+  );
 
   // バッファをフラッシュしてLLMで最終整形する
   const flushBufferAndRefine = useCallback(async () => {
@@ -652,10 +665,10 @@ export default function App(): JSX.Element {
       sentenceBufferRef.current = ''; // バッファをクリア
       setBufferText(''); // 表示もクリア
     }
-    
+
     // 整形処理が完了するまで少し待つ
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     // 全体を再整形（最終まとめ）
     const allText = refinedTextRef.current;
     if (allText.trim()) {
@@ -664,7 +677,7 @@ export default function App(): JSX.Element {
         const finalRefined = await refineText(allText, '');
         const finalWithoutNewlines = finalRefined.replace(/\n+/g, '');
         console.info('📋 Final refined text:', finalWithoutNewlines);
-        
+
         // 最終整形結果で置き換え
         setRefinedText(finalWithoutNewlines);
         refinedTextRef.current = finalWithoutNewlines;
@@ -678,7 +691,7 @@ export default function App(): JSX.Element {
   const handlePasteTranscript = useCallback(async () => {
     // まずバッファをフラッシュして最終整形
     await flushBufferAndRefine();
-    
+
     // 整形後テキストを優先、なければ整形中のinterimを使用
     const textToPaste = refinedTextRef.current || interimTranscript;
     if (!textToPaste) return;
@@ -706,8 +719,6 @@ export default function App(): JSX.Element {
         if (!pendingInterim && !hasPendingRefinement) {
           clearTranscript();
         }
-        // 手動編集フラグをリセットして自動更新を再開
-        setIsManuallyEdited(false);
       } else {
         console.error('❌ Failed to paste:', result.error);
         setError(`貼り付けに失敗しました: ${result.error}`);
@@ -755,7 +766,7 @@ export default function App(): JSX.Element {
                 }}
               >
                 <span style={{ color: '#fff' }}>{refinedText}</span>
-                <span 
+                <span
                   style={{ color: 'rgba(255, 255, 255, 0.4)', userSelect: 'none' }}
                   contentEditable={false}
                   suppressContentEditableWarning={true}
@@ -763,8 +774,16 @@ export default function App(): JSX.Element {
                   {bufferText}
                 </span>
                 {!refinedText && !bufferText && (
-                  <span style={{ color: 'rgba(255, 255, 255, 0.3)', position: 'absolute', pointerEvents: 'none' }}>
-                    {isListening ? 'お話しください...' : '文字起こしされたテキストがここに表示されます'}
+                  <span
+                    style={{
+                      color: 'rgba(255, 255, 255, 0.3)',
+                      position: 'absolute',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {isListening
+                      ? 'お話しください...'
+                      : '文字起こしされたテキストがここに表示されます'}
                   </span>
                 )}
               </div>
