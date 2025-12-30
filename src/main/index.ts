@@ -99,6 +99,58 @@ const registerGetConfigHandler = (): void => {
 registerGetConfigHandler();
 
 /**
+ * ElevenLabs Single Use Token取得のIPCハンドラー
+ */
+let isElevenLabsTokenHandlerRegistered = false;
+const registerElevenLabsTokenHandler = (): void => {
+  if (isElevenLabsTokenHandlerRegistered) return;
+
+  ipcMain.handle(
+    'elevenlabs:get-token',
+    async (): Promise<{ success: boolean; token?: string; error?: string }> => {
+      const apiKey = process.env.ELEVENLABS_API_KEY;
+      if (!apiKey) {
+        return { success: false, error: 'ElevenLabs APIキーが設定されていません' };
+      }
+
+      try {
+        const response = await fetch(
+          'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe',
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': apiKey,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('ElevenLabs token generation failed:', response.status, errorText);
+          return {
+            success: false,
+            error: `トークン生成エラー: ${response.status} ${errorText}`,
+          };
+        }
+
+        const data = (await response.json()) as { token: string };
+        console.log('✅ ElevenLabs token generated successfully');
+        return { success: true, token: data.token };
+      } catch (error) {
+        console.error('ElevenLabs token generation error:', error);
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'トークン生成に失敗しました',
+        };
+      }
+    }
+  );
+  isElevenLabsTokenHandlerRegistered = true;
+};
+
+registerElevenLabsTokenHandler();
+
+/**
  * Groq APIでテキストを整形するIPCハンドラー
  */
 let isGroqHandlerRegistered = false;
@@ -432,6 +484,10 @@ app.on('before-quit', () => {
   if (isGetConfigHandlerRegistered) {
     ipcMain.removeHandler('get-config');
     isGetConfigHandlerRegistered = false;
+  }
+  if (isElevenLabsTokenHandlerRegistered) {
+    ipcMain.removeHandler('elevenlabs:get-token');
+    isElevenLabsTokenHandlerRegistered = false;
   }
   if (isPasteHandlerRegistered) {
     ipcMain.removeHandler('paste-to-active-window');

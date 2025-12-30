@@ -506,7 +506,7 @@ export default function App(): JSX.Element {
     } else {
       // 開始処理：まず音声認識サービスに接続してからVADを開始
       console.info(`▶️  Starting: ${providerName} connection and VAD`);
-      connect(apiKey); // 音声認識サービス接続（即座にWebSocket接続開始）
+      await connect(apiKey); // 音声認識サービス接続（非同期待機）
       await toggleListening(); // VAD開始（非同期で待機）
       console.info('✅ VAD started, now listening');
     }
