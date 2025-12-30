@@ -5,7 +5,7 @@ type UseElevenLabsOptions = {
 };
 
 type UseElevenLabsReturn = {
-  connect: (apiKey: string) => void;
+  connect: (apiKey: string) => Promise<void>;
   disconnect: () => void;
   sendAudio: (audioData: Int16Array) => void;
   transcript: string;
@@ -15,9 +15,7 @@ type UseElevenLabsReturn = {
   clearTranscript: () => void;
 };
 
-export const MIN_API_KEY_LENGTH = 20;
 // ElevenLabs API keys typically start with 'sk_' and contain alphanumeric characters
-const ELEVENLABS_API_KEY_PATTERN = /^sk_[a-zA-Z0-9]{30,}$/;
 const isDebug = process.env.NODE_ENV !== 'production';
 
 /**
@@ -94,23 +92,7 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
     onFinalTranscriptRef.current = onFinalTranscript;
   }, [onFinalTranscript]);
 
-  const connect = useCallback((apiKey: string) => {
-    // Validate API key format
-    if (!apiKey || apiKey.trim().length === 0) {
-      setError('APIキーが無効です');
-      return;
-    }
-    const trimmedKey = apiKey.trim();
-    if (trimmedKey.length < MIN_API_KEY_LENGTH) {
-      setError('APIキーの形式が正しくありません');
-      return;
-    }
-    // Validate ElevenLabs API key format
-    if (!ELEVENLABS_API_KEY_PATTERN.test(trimmedKey)) {
-      setError('ElevenLabs APIキーの形式が正しくありません（sk_で始まる必要があります）');
-      return;
-    }
-
+  const connect = useCallback(async (_apiKey: string) => {
     if (
       socketRef.current?.readyState === WebSocket.OPEN ||
       socketRef.current?.readyState === WebSocket.CONNECTING
@@ -128,13 +110,26 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
     }
 
     try {
+      // シングルユーストークンを取得
+      console.log('🎫 Requesting ElevenLabs single-use token...');
+      const tokenResult = await window.electronAPI.getElevenLabsToken();
+
+      if (!tokenResult.success || !tokenResult.token) {
+        setError(tokenResult.error || 'トークン取得に失敗しました');
+        return;
+      }
+
+      console.log('✅ Token received, length:', tokenResult.token.length);
+
       // ElevenLabs Scribe v2 Realtime API
       // model_id: scribe_v2_realtime
       // audio_format: pcm_16000 (16kHz PCM)
       // language_code: ja (日本語)
       // commit_strategy: manual (手動コミット)
+      // token: シングルユーストークン（認証用）
       const url =
         'wss://api.elevenlabs.io/v1/speech-to-text/realtime?' +
+        `token=${encodeURIComponent(tokenResult.token)}&` +
         'model_id=scribe_v2_realtime&' +
         'audio_format=pcm_16000&' +
         'language_code=ja&' +
@@ -146,21 +141,8 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
       hasErrorOccurred.current = false;
 
       socket.onopen = () => {
-        debugLog('ElevenLabs WebSocket connected');
+        console.log('✅ ElevenLabs WebSocket connected with token auth');
         if (!isMountedRef.current) return; // Safety check
-
-        // 認証メッセージを送信
-        // ElevenLabsはWebSocketオープン後に認証情報を送る必要がある
-        const authMessage = {
-          xi_api_key: apiKey.trim(),
-        };
-        console.log(
-          '🔑 Sending auth with key length:',
-          apiKey.trim().length,
-          'starts with:',
-          apiKey.trim().substring(0, 5)
-        );
-        socket.send(JSON.stringify(authMessage));
 
         setIsConnected(true);
         setError(null);
