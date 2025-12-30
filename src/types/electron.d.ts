@@ -19,6 +19,15 @@ declare global {
         error?: string;
       }>;
       /**
+       * ElevenLabs Single Use Tokenを取得
+       * @returns トークン取得結果
+       */
+      getElevenLabsToken: () => Promise<{
+        success: boolean;
+        token?: string;
+        error?: string;
+      }>;
+      /**
        * テキストをアクティブウィンドウに貼り付ける
        * @param text 貼り付けるテキスト
        * @returns 結果オブジェクト
