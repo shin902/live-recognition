@@ -328,11 +328,8 @@ const createWindow = (): void => {
     },
   });
 
-  const shouldOpenDevTools =
-    process.env.NODE_ENV === 'development' && process.env.ELECTRON_OPEN_DEVTOOLS === 'true';
-  if (shouldOpenDevTools) {
-    mainWindow.webContents.openDevTools();
-  }
+  // デバッグ用：常に開発者ツールを開く
+  mainWindow.webContents.openDevTools();
 
   // レンダラープロセスのコンソールログをターミナルに出力
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
