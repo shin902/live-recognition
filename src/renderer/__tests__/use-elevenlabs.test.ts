@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useElevenLabs, MIN_API_KEY_LENGTH } from '../hooks/use-elevenlabs';
+import { useElevenLabs } from '../hooks/use-elevenlabs';
 
 /**
  * Test suite for useElevenLabs hook
@@ -59,11 +59,23 @@ let originalWebSocket: typeof WebSocket | undefined;
 
 // Valid ElevenLabs API key format for testing (sufficient length)
 const VALID_API_KEY = 'sk_1234567890abcdef1234567890abcdef';
+const MOCK_TOKEN = 'mock-single-use-token-123456789';
 
 beforeEach(() => {
   MockWebSocket.instances = [];
   originalWebSocket = globalThis.WebSocket;
   (globalThis as any).WebSocket = MockWebSocket as any;
+
+  // Mock window.electronAPI.getElevenLabsToken
+  if (!(globalThis as any).window) {
+    (globalThis as any).window = {};
+  }
+  (globalThis as any).window.electronAPI = {
+    getElevenLabsToken: vi.fn().mockResolvedValue({
+      success: true,
+      token: MOCK_TOKEN,
+    }),
+  };
 });
 
 afterEach(() => {
@@ -80,14 +92,15 @@ describe('useElevenLabs', () => {
     const onFinalTranscript = vi.fn();
     const { result } = renderHook(() => useElevenLabs({ onFinalTranscript }));
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
     expect(socket.url).toContain('wss://api.elevenlabs.io');
     expect(socket.url).toContain('model_id=scribe_v2_realtime');
     expect(socket.url).toContain('language_code=ja');
+    expect(socket.url).toContain(`token=${encodeURIComponent(MOCK_TOKEN)}`);
 
     act(() => {
       socket.triggerOpen();
@@ -95,9 +108,6 @@ describe('useElevenLabs', () => {
 
     expect(result.current.isConnected).toBe(true);
     expect(result.current.error).toBeNull();
-
-    // Verify authentication message was sent
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ xi_api_key: VALID_API_KEY }));
 
     // Session started message
     act(() => {
@@ -154,8 +164,8 @@ describe('useElevenLabs', () => {
   it('sends audio data as Base64 encoded JSON', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -193,8 +203,8 @@ describe('useElevenLabs', () => {
   it('handles errors and closes connection', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -219,8 +229,8 @@ describe('useElevenLabs', () => {
   it('handles different error message types', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -264,11 +274,11 @@ describe('useElevenLabs', () => {
     expect(result.current.error).toBe('ElevenLabs APIエラーが発生しました');
   });
 
-  it('does not reconnect when already connected', () => {
+  it('does not reconnect when already connected', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -276,8 +286,8 @@ describe('useElevenLabs', () => {
       firstSocket.triggerOpen();
     });
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     expect(MockWebSocket.instances.length).toBe(1);
@@ -298,11 +308,11 @@ describe('useElevenLabs', () => {
     }
   });
 
-  it('clears transcripts', () => {
+  it('clears transcripts', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
     const socket = MockWebSocket.instances[0];
     act(() => socket.triggerOpen());
@@ -326,11 +336,11 @@ describe('useElevenLabs', () => {
     expect(result.current.interimTranscript).toBe('');
   });
 
-  it('ignores malformed JSON messages', () => {
+  it('ignores malformed JSON messages', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -351,76 +361,68 @@ describe('useElevenLabs', () => {
     }
   });
 
-  it('rejects invalid API keys', () => {
+  it('rejects invalid API keys', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    // Empty key
-    act(() => {
-      result.current.connect('');
+    // Mock token fetch failure
+    (window.electronAPI.getElevenLabsToken as any).mockResolvedValueOnce({
+      success: false,
+      error: 'APIキーが無効です',
+    });
+
+    await act(async () => {
+      await result.current.connect('invalid-key');
     });
     expect(result.current.error).toBe('APIキーが無効です');
 
-    // Whitespace only
-    act(() => {
-      result.current.connect('   ');
+    // Mock token fetch failure without error message
+    (window.electronAPI.getElevenLabsToken as any).mockResolvedValueOnce({
+      success: false,
     });
-    expect(result.current.error).toBe('APIキーが無効です');
 
-    // Too short
-    act(() => {
-      result.current.connect('short');
+    await act(async () => {
+      await result.current.connect('another-invalid-key');
     });
-    expect(result.current.error).toBe('APIキーの形式が正しくありません');
+    expect(result.current.error).toBe('トークン取得に失敗しました');
 
-    // Test exact minimum length boundary
-    act(() => {
-      result.current.connect('a'.repeat(MIN_API_KEY_LENGTH - 1));
+    // Mock successful token fetch but no token
+    (window.electronAPI.getElevenLabsToken as any).mockResolvedValueOnce({
+      success: true,
+      token: null,
     });
-    expect(result.current.error).toBe('APIキーの形式が正しくありません');
 
-    // Invalid format (doesn't start with sk_)
-    act(() => {
-      result.current.connect('this-is-not-a-valid-elevenlabs-key!');
+    await act(async () => {
+      await result.current.connect('key-without-token');
     });
-    expect(result.current.error).toBe(
-      'ElevenLabs APIキーの形式が正しくありません（sk_で始まる必要があります）'
-    );
-
-    // Valid length but invalid format
-    act(() => {
-      result.current.connect('a'.repeat(40));
-    });
-    expect(result.current.error).toBe(
-      'ElevenLabs APIキーの形式が正しくありません（sk_で始まる必要があります）'
-    );
+    expect(result.current.error).toBe('トークン取得に失敗しました');
   });
 
-  it('prevents duplicate connections while CONNECTING', () => {
+  it('prevents duplicate connections while CONNECTING', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
     // First connect call creates socket in CONNECTING state
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
     expect(firstSocket.readyState).toBe(MockWebSocket.CONNECTING);
 
     // Second connect call should be ignored while still CONNECTING
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     // Should still have only one socket instance
     expect(MockWebSocket.instances.length).toBe(1);
   });
 
-  it('allows reconnection after disconnect', () => {
+  it('allows reconnection after disconnect', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
     // First connection
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -438,8 +440,8 @@ describe('useElevenLabs', () => {
     expect(result.current.isConnected).toBe(false);
 
     // Reconnect should work
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
@@ -451,12 +453,12 @@ describe('useElevenLabs', () => {
     expect(MockWebSocket.instances.length).toBe(2);
   });
 
-  it('handles rapid connect/disconnect cycles', () => {
+  it('handles rapid connect/disconnect cycles', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
     // Rapid connect/disconnect/connect
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -472,8 +474,8 @@ describe('useElevenLabs', () => {
 
     expect(result.current.isConnected).toBe(false);
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
@@ -484,12 +486,12 @@ describe('useElevenLabs', () => {
     expect(result.current.isConnected).toBe(true);
   });
 
-  it('handles many rapid sequential committed transcripts', () => {
+  it('handles many rapid sequential committed transcripts', async () => {
     const onFinalTranscript = vi.fn();
     const { result } = renderHook(() => useElevenLabs({ onFinalTranscript }));
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -517,12 +519,12 @@ describe('useElevenLabs', () => {
     expect(onFinalTranscript).toHaveBeenLastCalledWith('文15');
   });
 
-  it('allows reconnection after error', () => {
+  it('allows reconnection after error', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
     // First connection
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const firstSocket = MockWebSocket.instances[0];
@@ -542,8 +544,8 @@ describe('useElevenLabs', () => {
     expect(result.current.error).toBe('ElevenLabs接続エラーが発生しました');
 
     // Reconnect should work after error
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const secondSocket = MockWebSocket.instances[1];
@@ -556,12 +558,12 @@ describe('useElevenLabs', () => {
     expect(MockWebSocket.instances.length).toBe(2);
   });
 
-  it('handles committed_transcript_with_timestamps message type', () => {
+  it('handles committed_transcript_with_timestamps message type', async () => {
     const onFinalTranscript = vi.fn();
     const { result } = renderHook(() => useElevenLabs({ onFinalTranscript }));
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
@@ -582,11 +584,11 @@ describe('useElevenLabs', () => {
     expect(onFinalTranscript).toHaveBeenCalledWith('タイムスタンプ付き');
   });
 
-  it('ignores unknown message types', () => {
+  it('ignores unknown message types', async () => {
     const { result } = renderHook(() => useElevenLabs());
 
-    act(() => {
-      result.current.connect(VALID_API_KEY);
+    await act(async () => {
+      await result.current.connect(VALID_API_KEY);
     });
 
     const socket = MockWebSocket.instances[0];
