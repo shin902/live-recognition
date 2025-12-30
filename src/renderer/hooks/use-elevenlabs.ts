@@ -151,11 +151,16 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
 
         // 認証メッセージを送信
         // ElevenLabsはWebSocketオープン後に認証情報を送る必要がある
-        socket.send(
-          JSON.stringify({
-            xi_api_key: apiKey.trim(),
-          })
+        const authMessage = {
+          xi_api_key: apiKey.trim(),
+        };
+        console.log(
+          '🔑 Sending auth with key length:',
+          apiKey.trim().length,
+          'starts with:',
+          apiKey.trim().substring(0, 5)
         );
+        socket.send(JSON.stringify(authMessage));
 
         setIsConnected(true);
         setError(null);
@@ -179,7 +184,7 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
             data.message_type === 'auth_error' ||
             data.message_type === 'quota_exceeded'
           ) {
-            console.error('❌ ElevenLabs error:', data);
+            console.error('❌ ElevenLabs error:', JSON.stringify(data, null, 2));
             setError(data.message || data.error || 'ElevenLabs APIエラーが発生しました');
             return;
           }
@@ -222,8 +227,15 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
         }
       };
 
-      socket.onclose = () => {
-        debugLog('ElevenLabs WebSocket closed');
+      socket.onclose = (event) => {
+        const closeInfo = event
+          ? {
+              code: event.code,
+              reason: event.reason,
+              wasClean: event.wasClean,
+            }
+          : { code: 'unknown', reason: 'no event', wasClean: false };
+        console.log('ElevenLabs WebSocket closed:', closeInfo);
         // Only update state if not already handled by error handler and still mounted
         if (isMountedRef.current && socketRef.current === socket && !hasErrorOccurred.current) {
           setIsConnected(false);
@@ -233,7 +245,12 @@ export function useElevenLabs(options: UseElevenLabsOptions = {}): UseElevenLabs
       };
 
       socket.onerror = (e) => {
-        console.error('ElevenLabs WebSocket error:', e);
+        console.error('ElevenLabs WebSocket error:', {
+          type: e.type,
+          target: e.target,
+          message: e.message,
+          error: e.error,
+        });
         hasErrorOccurred.current = true;
         if (!isMountedRef.current) return;
 

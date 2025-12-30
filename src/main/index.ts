@@ -58,14 +58,24 @@ const registerGetConfigHandler = (): void => {
     try {
       // 環境変数からプロバイダーを取得（デフォルト: deepgram）
       const speechProvider = getSpeechProvider();
+      const deepgramKey = process.env.DEEPGRAM_API_KEY || '';
+      const elevenLabsKey = process.env.ELEVENLABS_API_KEY || '';
+
+      console.log('🔍 Config Debug:', {
+        speechProvider,
+        deepgramKeyLength: deepgramKey.length,
+        elevenLabsKeyLength: elevenLabsKey.length,
+        deepgramKeyStart: deepgramKey.substring(0, 5),
+        elevenLabsKeyStart: elevenLabsKey.substring(0, 5),
+      });
 
       return {
         appVersion: app.getVersion(),
         nodeVersion: process.version,
         platform: process.platform,
         speechProvider,
-        deepgramKey: process.env.DEEPGRAM_API_KEY || '',
-        elevenLabsKey: process.env.ELEVENLABS_API_KEY || '',
+        deepgramKey,
+        elevenLabsKey,
         hasGroqKey: !!process.env.GROQ_API_KEY,
       };
     } catch (error) {

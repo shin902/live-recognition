@@ -488,6 +488,10 @@ export default function App(): JSX.Element {
       config?.speechProvider === 'elevenlabs' ? config?.elevenLabsKey : config?.deepgramKey;
     const providerName = config?.speechProvider === 'elevenlabs' ? 'ElevenLabs' : 'Deepgram';
 
+    console.log(
+      `🔍 Debug - Provider: ${config?.speechProvider}, API Key length: ${apiKey?.length || 0}, starts with: ${apiKey?.substring(0, 5) || 'N/A'}`
+    );
+
     if (!apiKey) {
       console.error(`❌ No ${providerName} API key found`);
       setError(`${providerName} APIキーが設定されていません`);
