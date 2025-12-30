@@ -358,8 +358,8 @@ const createWindow = (): void => {
   });
 
   // レンダラープロセスをロード
-  // __dirname = dist/main なので、../renderer/index.html で dist/renderer/index.html を指す
-  const rendererPath = path.join(__dirname, '..', 'renderer', 'index.html');
+  // __dirname = dist/main/main なので、../../renderer/index.html で dist/renderer/index.html を指す
+  const rendererPath = path.join(__dirname, '..', '..', 'renderer', 'index.html');
   mainWindow.loadFile(rendererPath);
 
   const menuTemplate: MenuItemConstructorOptions[] = [
