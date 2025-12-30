@@ -840,8 +840,9 @@ export default function App(): JSX.Element {
                 </div>
 
                 <div className="pills">
-                  <span className={`pill ${isDeepgramConnected ? 'ok' : 'ng'}`}>
-                    DG: {isDeepgramConnected ? 'ON' : 'OFF'}
+                  <span className={`pill ${isSpeechConnected ? 'ok' : 'ng'}`}>
+                    {config?.speechProvider === 'elevenlabs' ? 'EL' : 'DG'}:{' '}
+                    {isSpeechConnected ? 'ON' : 'OFF'}
                   </span>
                 </div>
               </div>
