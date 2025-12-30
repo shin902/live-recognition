@@ -4,7 +4,7 @@ import { useDeepgram, KEEPALIVE_INTERVAL_MS, MIN_API_KEY_LENGTH } from '../hooks
 
 /**
  * Test suite for useDeepgram hook
- * 
+ *
  * Coverage:
  * - Connection lifecycle (connect, disconnect, reconnect)
  * - WebSocket state management and cleanup
@@ -24,16 +24,19 @@ class MockWebSocket {
 
   readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
-  onmessage: ((event: { data: any }) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
-  onerror: ((event: any) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
   send = vi.fn();
   close = vi.fn(() => {
     this.readyState = MockWebSocket.CLOSED;
     this.onclose?.();
   });
 
-  constructor(public url: string, public protocols?: string | string[]) {
+  constructor(
+    public url: string,
+    public protocols?: string | string[]
+  ) {
     MockWebSocket.instances.push(this);
   }
 
@@ -44,12 +47,12 @@ class MockWebSocket {
   }
 
   /** Simulate receiving a message */
-  triggerMessage(data: any) {
+  triggerMessage(data: unknown) {
     this.onmessage?.({ data } as MessageEvent);
   }
 
   /** Simulate WebSocket error */
-  triggerError(error: any) {
+  triggerError(error: Event) {
     this.onerror?.(error);
   }
 }
@@ -63,13 +66,13 @@ beforeEach(() => {
   vi.useFakeTimers();
   MockWebSocket.instances = [];
   originalWebSocket = globalThis.WebSocket;
-  (globalThis as any).WebSocket = MockWebSocket as any;
+  (globalThis as unknown as { WebSocket: unknown }).WebSocket = MockWebSocket;
 });
 
 afterEach(() => {
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
-  (globalThis as any).WebSocket = originalWebSocket;
+  (globalThis as unknown as { WebSocket: unknown }).WebSocket = originalWebSocket;
   vi.clearAllMocks();
 });
 
@@ -300,13 +303,17 @@ describe('useDeepgram', () => {
     act(() => {
       result.current.connect('this-is-not-a-valid-deepgram-api-key!');
     });
-    expect(result.current.error).toBe('Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）');
+    expect(result.current.error).toBe(
+      'Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）'
+    );
 
     // Valid length but invalid characters
     act(() => {
       result.current.connect('z'.repeat(40));
     });
-    expect(result.current.error).toBe('Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）');
+    expect(result.current.error).toBe(
+      'Deepgram APIキーの形式が正しくありません（40文字の16進数である必要があります）'
+    );
   });
 
   it('prevents duplicate connections while CONNECTING', () => {

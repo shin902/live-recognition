@@ -43,7 +43,6 @@ export function useVoiceInput({
           onSpeechStart: () => {
             if (!mounted) return;
             setStatus('speech_detected');
-            console.log('Speech started');
             callbacksRef.current.onSpeechStart?.();
           },
           onFrameProcessed: (probs, frame) => {
@@ -56,7 +55,6 @@ export function useVoiceInput({
           onSpeechEnd: (audio) => {
             if (!mounted) return;
             setStatus('processing');
-            console.log('Speech ended', audio.length);
 
             try {
               const wavBlob = convertFloat32ToWav(audio, 16000);
@@ -70,7 +68,6 @@ export function useVoiceInput({
           },
           onVADMisfire: () => {
             if (!mounted) return;
-            console.log('VAD misfire');
             setStatus('listening');
           },
         });

@@ -146,7 +146,7 @@ export default function App(): JSX.Element {
   const [refineError, setRefineError] = useState<string | null>(null);
 
   const processedTranscriptsRef = useRef<Map<string, number>>(new Map()); // 処理済みテキストとタイムスタンプ
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef = useRef<HTMLDivElement>(null);
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const refiningCountRef = useRef(0); // 並行実行中の整形処理数
   const prevHeightRef = useRef(0); // 前回のtextarea高さ
@@ -749,7 +749,7 @@ export default function App(): JSX.Element {
             {/* テキストエリア */}
             <div className="transcript-area-container">
               <div
-                ref={textareaRef as any}
+                ref={textareaRef}
                 className="transcript-textarea"
                 contentEditable={true}
                 suppressContentEditableWarning={true}

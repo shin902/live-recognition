@@ -25,9 +25,9 @@ class MockWebSocket {
 
   readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
-  onmessage: ((event: { data: any }) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
   onclose: (() => void) | null = null;
-  onerror: ((event: any) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
   send = vi.fn();
   close = vi.fn(() => {
     this.readyState = MockWebSocket.CLOSED;
@@ -45,12 +45,12 @@ class MockWebSocket {
   }
 
   /** Simulate receiving a message */
-  triggerMessage(data: any) {
+  triggerMessage(data: unknown) {
     this.onmessage?.({ data } as MessageEvent);
   }
 
   /** Simulate WebSocket error */
-  triggerError(error: any) {
+  triggerError(error: Event) {
     this.onerror?.(error);
   }
 }
@@ -63,11 +63,11 @@ const VALID_API_KEY = 'sk_1234567890abcdef1234567890abcdef';
 beforeEach(() => {
   MockWebSocket.instances = [];
   originalWebSocket = globalThis.WebSocket;
-  (globalThis as any).WebSocket = MockWebSocket as any;
+  (globalThis as unknown as { WebSocket: unknown }).WebSocket = MockWebSocket;
 });
 
 afterEach(() => {
-  (globalThis as any).WebSocket = originalWebSocket;
+  (globalThis as unknown as { WebSocket: unknown }).WebSocket = originalWebSocket;
   vi.clearAllMocks();
 });
 

@@ -14,8 +14,8 @@ describe('speech-provider', () => {
   });
 
   describe('DEFAULT_SPEECH_PROVIDER', () => {
-    it('should be elevenlabs', () => {
-      expect(DEFAULT_SPEECH_PROVIDER).toBe('elevenlabs');
+    it('should be deepgram', () => {
+      expect(DEFAULT_SPEECH_PROVIDER).toBe('deepgram');
     });
   });
 

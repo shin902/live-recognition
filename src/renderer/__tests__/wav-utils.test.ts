@@ -4,8 +4,8 @@ import { convertFloat32ToWav, float32ToInt16 } from '../utils/wav-utils';
 const readString = (view: DataView, offset: number, length: number) =>
   Array.from({ length }, (_, i) => String.fromCharCode(view.getUint8(offset + i))).join('');
 const toArrayBuffer = async (blob: Blob) =>
-  typeof (blob as any).arrayBuffer === 'function'
-    ? await (blob as any).arrayBuffer()
+  typeof (blob as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> }).arrayBuffer === 'function'
+    ? await (blob as Blob & { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer()
     : await new Promise<ArrayBuffer>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as ArrayBuffer);
