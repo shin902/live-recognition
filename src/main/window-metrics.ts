@@ -1,4 +1,3 @@
-// test related
 export interface WindowConfig {
   WIDTH: number;
   HEIGHT: number;

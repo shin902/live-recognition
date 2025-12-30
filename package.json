@@ -16,8 +16,7 @@
     "lint:fix": "eslint src --ext .ts,.tsx --fix",
     "format": "prettier --write src",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "prepare": "husky"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@ricky0123/vad-web": "^0.0.30",
@@ -26,19 +25,9 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
-  "lint-staged": {
-    "*.{js,ts,jsx,tsx}": [
-      "eslint --fix",
-      "prettier --write",
-      "vitest related --run"
-    ],
-    "*.{json,md,css,html}": [
-      "prettier --write"
-    ]
-  },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.1",
+    "@testing-library/jest-dom": "^6.6.3",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
@@ -50,9 +39,7 @@
     "electron-builder": "^24.6.4",
     "eslint": "^8.56.0",
     "eslint-config-prettier": "^9.1.0",
-    "husky": "^9.1.7",
     "jsdom": "^22.1.0",
-    "lint-staged": "^16.2.7",
     "prettier": "^3.1.1",
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
